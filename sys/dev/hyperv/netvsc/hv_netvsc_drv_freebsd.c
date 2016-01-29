@@ -858,7 +858,7 @@ hn_encap(struct hn_softc *sc, struct hn_txdesc *txd, struct mbuf **m_head0)
 		rndis_msg_size += RNDIS_CSUM_PPI_SIZE;
 		rppi = hv_set_rppi_data(rndis_mesg, RNDIS_CSUM_PPI_SIZE,
 		    tcpip_chksum_info);
-		csum_info = (rndis_tcp_ip_csum_info *)((char*)rppi +
+		csum_info = (rndis_tcp_ip_csum_info *)((uint8_t *)rppi +
 		    rppi->per_packet_info_offset);
 
 		csum_info->xmit.is_ipv4 = 1;
