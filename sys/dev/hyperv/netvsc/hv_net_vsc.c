@@ -136,15 +136,15 @@ hv_nv_get_next_send_section(netvsc_dev *net_dev)
 	int i;
 
 	for (i = 0; i < bitsmap_words; i++) {
-		idx = ffs(~bitsmap[i]);
+		idx = ffsl(~bitsmap[i]);
 		if (0 == idx)
 			continue;
 
 		idx--;
-		if (i * BITS_PER_LONG + idx >= net_dev->send_section_count)
-			return (ret);
+		KASSERT(i * BITS_PER_LONG + idx < net_dev->send_section_count,
+		    ("invalid i %d and idx %lu", i, idx));
 
-		if (synch_test_and_set_bit(idx, &bitsmap[i]))
+		if (atomic_testandset_long(&bitsmap[i], idx))
 			continue;
 
 		ret = i * BITS_PER_LONG + idx;
@@ -789,8 +789,26 @@ hv_nv_on_send_completion(netvsc_dev *net_dev,
 		if (NULL != net_vsc_pkt) {
 			if (net_vsc_pkt->send_buf_section_idx !=
 			    NVSP_1_CHIMNEY_SEND_INVALID_SECTION_INDEX) {
-				synch_change_bit(net_vsc_pkt->send_buf_section_idx,
-				    net_dev->send_section_bitsmap);
+				int bit_idx, idx;
+
+				idx = net_vsc_pkt->send_buf_section_idx /
+				    BITS_PER_LONG;
+				KASSERT(idx < net_dev->bitsmap_words,
+				    ("invalid section index %u",
+				     net_vsc_pkt->send_buf_section_idx));
+				bit_idx = net_vsc_pkt->send_buf_section_idx %
+				    BITS_PER_LONG;
+
+				KASSERT(net_dev->send_section_bitsmap[idx] &
+				    (1 << bit_idx),
+				    ("index bitmap 0x%lx, section index %u, "
+				     "bitmap idx %d, bitmask 0x%lx",
+				     net_dev->send_section_bitsmap[idx],
+				     net_vsc_pkt->send_buf_section_idx,
+				     idx, 1UL << bit_idx));
+				atomic_clear_long(
+				    &net_dev->send_section_bitsmap[idx],
+				    1UL << bit_idx);
 			}
 			
 			/* Notify the layer above us */
