@@ -789,26 +789,27 @@ hv_nv_on_send_completion(netvsc_dev *net_dev,
 		if (NULL != net_vsc_pkt) {
 			if (net_vsc_pkt->send_buf_section_idx !=
 			    NVSP_1_CHIMNEY_SEND_INVALID_SECTION_INDEX) {
-				int bit_idx, idx;
+				u_long mask;
+				int idx;
 
 				idx = net_vsc_pkt->send_buf_section_idx /
 				    BITS_PER_LONG;
 				KASSERT(idx < net_dev->bitsmap_words,
 				    ("invalid section index %u",
 				     net_vsc_pkt->send_buf_section_idx));
-				bit_idx = net_vsc_pkt->send_buf_section_idx %
-				    BITS_PER_LONG;
+				mask = 1UL <<
+				    (net_vsc_pkt->send_buf_section_idx %
+				     BITS_PER_LONG);
 
 				KASSERT(net_dev->send_section_bitsmap[idx] &
-				    (1 << bit_idx),
+				    mask,
 				    ("index bitmap 0x%lx, section index %u, "
 				     "bitmap idx %d, bitmask 0x%lx",
 				     net_dev->send_section_bitsmap[idx],
 				     net_vsc_pkt->send_buf_section_idx,
-				     idx, 1UL << bit_idx));
+				     idx, mask));
 				atomic_clear_long(
-				    &net_dev->send_section_bitsmap[idx],
-				    1UL << bit_idx);
+				    &net_dev->send_section_bitsmap[idx], mask);
 			}
 			
 			/* Notify the layer above us */
