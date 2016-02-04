@@ -91,6 +91,8 @@ struct lro_ctrl {
 	unsigned	lro_cnt;
 	unsigned	lro_mbuf_count;
 	unsigned	lro_mbuf_max;
+	unsigned short	lro_ack_append_lim;
+	unsigned short	lro_data_append_lim;
 
 	struct lro_head	lro_active;
 	struct lro_head	lro_free;
