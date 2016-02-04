@@ -1031,7 +1031,6 @@ typedef struct hn_softc {
 
 	struct lro_ctrl	hn_lro;
 	int		hn_lro_hiwat;
-	int		hn_lro_append_max;
 
 	/* Trust csum verification on host side */
 	int		hn_trust_hcsum;	/* HN_TRUST_HCSUM_ */
