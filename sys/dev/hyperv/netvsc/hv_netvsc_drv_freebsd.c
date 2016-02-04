@@ -185,6 +185,8 @@ struct hn_txdesc {
     ((hiwat) >= HN_LRO_HIWAT_MTULIM((sc)->hn_ifp) ||	\
      (hiwat) <= HN_LRO_HIWAT_MAX)
 
+#define HN_LRO_APPEND_MAX	20
+
 /*
  * Be aware that this sleepable mutex will exhibit WITNESS errors when
  * certain TCP and ARP code paths are taken.  This appears to be a
@@ -471,6 +473,8 @@ netvsc_attach(device_t dev)
 	    hn_tx_chimney_size < sc->hn_tx_chimney_max)
 		sc->hn_tx_chimney_size = hn_tx_chimney_size;
 
+	sc->hn_lro_append_max = HN_LRO_APPEND_MAX;
+
 	ctx = device_get_sysctl_ctx(dev);
 	child = SYSCTL_CHILDREN(device_get_sysctl_tree(dev));
 
@@ -538,6 +542,9 @@ netvsc_attach(device_t dev)
 	    CTLFLAG_RW, &sc->hn_sched_tx, 0,
 	    "Always schedule transmission "
 	    "instead of doing direct transmission");
+	SYSCTL_ADD_INT(ctx, child, OID_AUTO, "lro_append_max",
+	    CTLFLAG_RW, &sc->hn_lro_append_max, 0,
+	    "LRO TCP segments aggregation limit");
 
 	if (unit == 0) {
 		struct sysctl_ctx_list *dc_ctx;
@@ -1351,8 +1358,20 @@ skip:
 }
 
 void
-netvsc_recv_rollup(struct hv_device *device_ctx __unused)
+netvsc_recv_rollup(struct hv_device *device_ctx)
 {
+#if defined(INET) || defined(INET6)
+	struct hn_softc *sc = device_get_softc(device_ctx->device);
+	struct lro_ctrl *lro = &sc->hn_lro;
+	struct lro_entry *queued, *tmp;
+
+	SLIST_FOREACH_SAFE(queued, &lro->lro_active, next, tmp) {
+		if (queued->append_cnt < sc->hn_lro_append_max)
+			continue;
+		SLIST_REMOVE(&lro->lro_active, queued, lro_entry, next);
+		tcp_lro_flush(lro, queued);
+	}
+#endif
 }
 
 /*
