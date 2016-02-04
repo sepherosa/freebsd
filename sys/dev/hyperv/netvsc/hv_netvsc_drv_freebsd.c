@@ -478,6 +478,13 @@ netvsc_attach(device_t dev)
 
 	sc->hn_lro_append_max = HN_LRO_APPEND_MAX;
 
+	/*
+	 * Always schedule transmission instead of trying
+	 * to do direct transmission.  This one gives the
+	 * best performance so far.
+	 */
+	sc->hn_sched_tx = 1;
+
 	ctx = device_get_sysctl_ctx(dev);
 	child = SYSCTL_CHILDREN(device_get_sysctl_tree(dev));
 
