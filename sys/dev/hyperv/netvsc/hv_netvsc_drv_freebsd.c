@@ -266,9 +266,6 @@ static void hn_destroy_tx_ring(struct hn_softc *sc);
 static void hn_start_taskfunc(void *xsc, int pending);
 static void hn_txeof_taskfunc(void *xsc, int pending);
 static int hn_encap(struct hn_softc *, struct hn_txdesc *, struct mbuf **);
-#if defined(INET) || defined(INET6)
-static void hn_lro_flush(struct hn_softc *);
-#endif
 
 static __inline void
 hn_set_lro_hiwat(struct hn_softc *sc, int hiwat)
@@ -1191,21 +1188,6 @@ hv_m_append(struct mbuf *m0, int len, c_caddr_t cp)
 	return (remainder == 0);
 }
 
-#if defined(INET) || defined(INET6)
-static void
-hn_lro_flush(struct hn_softc *sc)
-{
-	struct lro_ctrl *lro = &sc->hn_lro;
-	struct lro_entry *queued, *tmp;
-
-	SLIST_FOREACH_SAFE(queued, &lro->lro_active, next, tmp) {
-		if (queued->append_cnt < sc->hn_lro_append_max)
-			continue;
-		SLIST_REMOVE(&lro->lro_active, queued, lro_entry, next);
-		tcp_lro_flush(lro, queued);
-	}
-}
-#endif
 
 /*
  * Called when we receive a data packet from the "wire" on the
@@ -1386,7 +1368,16 @@ void
 netvsc_recv_rollup(struct hv_device *device_ctx)
 {
 #if defined(INET) || defined(INET6)
-	hn_lro_flush(device_get_softc(device_ctx->device));
+	struct hn_softc *sc = device_get_softc(device_ctx->device);
+	struct lro_ctrl *lro = &sc->hn_lro;
+	struct lro_entry *queued, *tmp;
+
+	SLIST_FOREACH_SAFE(queued, &lro->lro_active, next, tmp) {
+		if (queued->append_cnt < sc->hn_lro_append_max)
+			continue;
+		SLIST_REMOVE(&lro->lro_active, queued, lro_entry, next);
+		tcp_lro_flush(lro, queued);
+	}
 #endif
 }
 
