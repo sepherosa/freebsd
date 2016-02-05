@@ -238,7 +238,7 @@ TUNABLE_INT("dev.hn.lro_entry_count", &hn_lro_entry_count);
 #endif
 #endif
 
-static int hn_share_tx_taskq = 1;
+static int hn_share_tx_taskq = 0;
 TUNABLE_INT("hw.hn.share_tx_taskq", &hn_share_tx_taskq);
 
 static struct taskqueue	*hn_tx_taskq;
