@@ -176,8 +176,14 @@ struct hn_txdesc {
 #define HN_CSUM_ASSIST_WIN8	(CSUM_TCP)
 #define HN_CSUM_ASSIST		(CSUM_IP | CSUM_UDP | CSUM_TCP)
 
-#define HN_LRO_ACK_APPEND_LIM	1
-#define HN_LRO_DATA_APPEND_LIM	25
+/* XXX move to netinet/tcp_lro.h */
+#define HN_LRO_HIWAT_MAX				65535
+#define HN_LRO_HIWAT_DEF				HN_LRO_HIWAT_MAX
+/* YYY 2*MTU is a bit rough, but should be good enough. */
+#define HN_LRO_HIWAT_MTULIM(ifp)			(2 * (ifp)->if_mtu)
+#define HN_LRO_HIWAT_ISVALID(sc, hiwat)			\
+    ((hiwat) >= HN_LRO_HIWAT_MTULIM((sc)->hn_ifp) ||	\
+     (hiwat) <= HN_LRO_HIWAT_MAX)
 
 /*
  * Be aware that this sleepable mutex will exhibit WITNESS errors when
@@ -247,15 +253,26 @@ static void hn_start(struct ifnet *ifp);
 static void hn_start_txeof(struct ifnet *ifp);
 static int hn_ifmedia_upd(struct ifnet *ifp);
 static void hn_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr);
+#ifdef HN_LRO_HIWAT
+static int hn_lro_hiwat_sysctl(SYSCTL_HANDLER_ARGS);
+#endif
 static int hn_trust_hcsum_sysctl(SYSCTL_HANDLER_ARGS);
 static int hn_tx_chimney_size_sysctl(SYSCTL_HANDLER_ARGS);
-static int hn_lro_append_lim_sysctl(SYSCTL_HANDLER_ARGS);
 static int hn_check_iplen(const struct mbuf *, int);
 static int hn_create_tx_ring(struct hn_softc *sc);
 static void hn_destroy_tx_ring(struct hn_softc *sc);
 static void hn_start_taskfunc(void *xsc, int pending);
 static void hn_txeof_taskfunc(void *xsc, int pending);
 static int hn_encap(struct hn_softc *, struct hn_txdesc *, struct mbuf **);
+
+static __inline void
+hn_set_lro_hiwat(struct hn_softc *sc, int hiwat)
+{
+	sc->hn_lro_hiwat = hiwat;
+#ifdef HN_LRO_HIWAT
+	sc->hn_lro.lro_hiwat = sc->hn_lro_hiwat;
+#endif
+}
 
 static int
 hn_ifmedia_upd(struct ifnet *ifp __unused)
@@ -341,6 +358,7 @@ netvsc_attach(device_t dev)
 	bzero(sc, sizeof(hn_softc_t));
 	sc->hn_unit = unit;
 	sc->hn_dev = dev;
+	sc->hn_lro_hiwat = HN_LRO_HIWAT_DEF;
 	sc->hn_direct_tx_size = hn_direct_tx_size;
 	if (hn_trust_hosttcp)
 		sc->hn_trust_hcsum |= HN_TRUST_HCSUM_TCP;
@@ -424,8 +442,9 @@ netvsc_attach(device_t dev)
 	/* Driver private LRO settings */
 	sc->hn_lro.ifp = ifp;
 #endif
-	sc->hn_lro.lro_ack_append_lim = HN_LRO_ACK_APPEND_LIM;
-	sc->hn_lro.lro_data_append_lim = HN_LRO_DATA_APPEND_LIM;
+#ifdef HN_LRO_HIWAT
+	sc->hn_lro.lro_hiwat = sc->hn_lro_hiwat;
+#endif
 #endif	/* INET || INET6 */
 
 #if __FreeBSD_version >= 1100045
@@ -461,6 +480,11 @@ netvsc_attach(device_t dev)
 	    CTLFLAG_RW, &sc->hn_lro.lro_flushed, 0, "LRO flushed");
 	SYSCTL_ADD_ULONG(ctx, child, OID_AUTO, "lro_tried",
 	    CTLFLAG_RW, &sc->hn_lro_tried, "# of LRO tries");
+#ifdef HN_LRO_HIWAT
+	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "lro_hiwat",
+	    CTLTYPE_INT | CTLFLAG_RW, sc, 0, hn_lro_hiwat_sysctl,
+	    "I", "LRO high watermark");
+#endif
 	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "trust_hosttcp",
 	    CTLTYPE_INT | CTLFLAG_RW, sc, HN_TRUST_HCSUM_TCP,
 	    hn_trust_hcsum_sysctl, "I",
@@ -514,14 +538,6 @@ netvsc_attach(device_t dev)
 	    CTLFLAG_RW, &sc->hn_sched_tx, 0,
 	    "Always schedule transmission "
 	    "instead of doing direct transmission");
-	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "lro_ack_append_lim",
-	    CTLTYPE_INT | CTLFLAG_RW, &sc->hn_lro.lro_ack_append_lim,
-	    0, hn_lro_append_lim_sysctl,
-	    "I", "LRO ACK appending limitation");
-	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "lro_data_append_lim",
-	    CTLTYPE_INT | CTLFLAG_RW, &sc->hn_lro.lro_data_append_lim,
-	    0, hn_lro_append_lim_sysctl,
-	    "I", "LRO data segments appending limitation");
 
 	if (unit == 0) {
 		struct sysctl_ctx_list *dc_ctx;
@@ -1394,6 +1410,13 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 		/* Obtain and record requested MTU */
 		ifp->if_mtu = ifr->ifr_mtu;
+		/*
+		 * Make sure that LRO high watermark is still valid,
+		 * after MTU change (the 2*MTU limit).
+		 */
+		if (!HN_LRO_HIWAT_ISVALID(sc, sc->hn_lro_hiwat))
+			hn_set_lro_hiwat(sc, HN_LRO_HIWAT_MTULIM(ifp));
+
 		do {
 			NV_LOCK(sc);
 			if (!sc->temp_unusable) {
@@ -1699,6 +1722,27 @@ hn_watchdog(struct ifnet *ifp)
 }
 #endif
 
+#ifdef HN_LRO_HIWAT
+static int
+hn_lro_hiwat_sysctl(SYSCTL_HANDLER_ARGS)
+{
+	struct hn_softc *sc = arg1;
+	int hiwat, error;
+
+	hiwat = sc->hn_lro_hiwat;
+	error = sysctl_handle_int(oidp, &hiwat, 0, req);
+	if (error || req->newptr == NULL)
+		return error;
+
+	if (!HN_LRO_HIWAT_ISVALID(sc, hiwat))
+		return EINVAL;
+
+	if (sc->hn_lro_hiwat != hiwat)
+		hn_set_lro_hiwat(sc, hiwat);
+	return 0;
+}
+#endif	/* HN_LRO_HIWAT */
+
 static int
 hn_trust_hcsum_sysctl(SYSCTL_HANDLER_ARGS)
 {
@@ -1739,24 +1783,6 @@ hn_tx_chimney_size_sysctl(SYSCTL_HANDLER_ARGS)
 
 	if (sc->hn_tx_chimney_size != chimney_size)
 		sc->hn_tx_chimney_size = chimney_size;
-	return 0;
-}
-
-static int
-hn_lro_append_lim_sysctl(SYSCTL_HANDLER_ARGS)
-{
-	unsigned short *lro_lim = arg1;
-	int lim, error;
-
-	lim = *lro_lim;
-	error = sysctl_handle_int(oidp, &lim, 0, req);
-	if (error || req->newptr == NULL)
-		return error;
-
-	if (lim < 0 || lim > 65535)
-		return EINVAL;
-
-	*lro_lim = lim;
 	return 0;
 }
 

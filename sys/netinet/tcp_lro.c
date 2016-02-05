@@ -88,8 +88,6 @@ tcp_lro_init_args(struct lro_ctrl *lc, struct ifnet *ifp,
 	lc->lro_mbuf_max = lro_mbufs;
 	lc->lro_cnt = lro_entries;
 	lc->ifp = ifp;
-	lc->lro_ack_append_lim = 0;
-	lc->lro_data_append_lim = 0;
 	SLIST_INIT(&lc->lro_free);
 	SLIST_INIT(&lc->lro_active);
 
@@ -648,16 +646,6 @@ tcp_lro_rx(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum)
 
 		if (tcp_data_len == 0) {
 			m_freem(m);
-			/*
-			 * Flush this LRO entry, if this ACK should
-			 * not be further delayed.
-			 */
-			if (lc->lro_ack_append_lim &&
-			    le->append_cnt >= lc->lro_ack_append_lim) {
-				SLIST_REMOVE(&lc->lro_active, le, lro_entry,
-				    next);
-				tcp_lro_flush(lc, le);
-			}
 			return (0);
 		}
 
@@ -676,12 +664,9 @@ tcp_lro_rx(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum)
 
 		/*
 		 * If a possible next full length packet would cause an
-		 * overflow, pro-actively flush now.  And if we are asked
-		 * to limit the data aggregate, flush this LRO entry now.
+		 * overflow, pro-actively flush now.
 		 */
-		if (le->p_len > (65535 - lc->ifp->if_mtu) ||
-		    (lc->lro_data_append_lim &&
-		     le->append_cnt >= lc->lro_data_append_lim)) {
+		if (le->p_len > (65535 - lc->ifp->if_mtu)) {
 			SLIST_REMOVE(&lc->lro_active, le, lro_entry, next);
 			tcp_lro_flush(lc, le);
 		} else
