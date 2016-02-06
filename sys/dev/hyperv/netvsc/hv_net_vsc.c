@@ -130,28 +130,32 @@ int
 hv_nv_get_next_send_section(netvsc_dev *net_dev)
 {
 	unsigned long bitsmap_words = net_dev->bitsmap_words;
-	unsigned long *bitsmap = net_dev->send_section_bitsmap;
-	unsigned long idx;
-	int ret = NVSP_1_CHIMNEY_SEND_INVALID_SECTION_INDEX;
+	volatile unsigned long *bitsmap = net_dev->send_section_bitsmap;
 	int i;
 
 	for (i = 0; i < bitsmap_words; i++) {
-		idx = ffsl(~bitsmap[i]);
-		if (0 == idx)
-			continue;
+		int j;
 
-		idx--;
-		KASSERT(i * BITS_PER_LONG + idx < net_dev->send_section_count,
-		    ("invalid i %d and idx %lu", i, idx));
+		/* Don't try too many times */
+		for (j = 0; j < BITS_PER_LONG; ++j) {
+			int idx, ret;
 
-		if (atomic_testandset_long(&bitsmap[i], idx))
-			continue;
+			idx = ffsl(~bitsmap[i]);
+			if (idx == 0)
+				break;
 
-		ret = i * BITS_PER_LONG + idx;
-		break;
+			idx--;
+			ret = (i * BITS_PER_LONG) + idx;
+			KASSERT(ret < net_dev->send_section_count,
+			    ("invalid i %d and idx %d", i, idx));
+
+			if (atomic_testandset_long(&bitsmap[i], idx))
+				continue;
+
+			return ret;
+		}
 	}
-
-	return (ret);
+	return NVSP_1_CHIMNEY_SEND_INVALID_SECTION_INDEX;
 }
 
 /*
