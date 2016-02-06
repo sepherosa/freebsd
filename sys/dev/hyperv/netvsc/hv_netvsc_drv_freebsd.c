@@ -1036,10 +1036,13 @@ hn_start_locked(struct ifnet *ifp, int len, int *haspkt, int oactflag)
 		struct hn_txdesc *txd;
 		struct mbuf *m_head;
 
+		*haspkt = 1;
+		if (!oactflag && !sc->hn_txdesc_avail)
+			break;
+
 		IFQ_DRV_DEQUEUE(&ifp->if_snd, m_head);
 		if (m_head == NULL)
 			break;
-		*haspkt = 1;
 
 		if (len > 0 && m_head->m_pkthdr.len > len) {
 			/*
