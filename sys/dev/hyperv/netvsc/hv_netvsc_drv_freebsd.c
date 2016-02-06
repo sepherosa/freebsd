@@ -2094,7 +2094,9 @@ hn_start_spin_taskfunc(void *xsc, int pending __unused)
 	hn_start_locked(ifp, 0, &haspkt, 0);
 	NV_UNLOCK(sc);
 
-	if ((haspkt && sc->hn_txdesc_avail) || sc->hn_txspin_cnt == 0)
+	if (!sc->hn_txdesc_avail)
+		sc->hn_txspin_cnt = 0;
+	else if (haspkt || sc->hn_txspin_cnt == 0)
 		sc->hn_txspin_cnt = sc->hn_txspin_max;
 	else
 		sc->hn_txspin_cnt--;
