@@ -250,7 +250,8 @@ static void hn_stop(hn_softc_t *sc);
 static void hn_ifinit_locked(hn_softc_t *sc);
 static void hn_ifinit(void *xsc);
 static int  hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data);
-static int hn_start_locked(struct ifnet *ifp, int len);
+static int hn_start_locked(struct ifnet *ifp, int len, int *haspkt,
+		int oactflag);
 static void hn_start(struct ifnet *ifp);
 static void hn_start_txeof(struct ifnet *ifp);
 static int hn_ifmedia_upd(struct ifnet *ifp);
@@ -999,12 +1000,13 @@ done:
  * Start a transmit of one or more packets
  */
 static int
-hn_start_locked(struct ifnet *ifp, int len)
+hn_start_locked(struct ifnet *ifp, int len, int *haspkt, int oactflag)
 {
 	struct hn_softc *sc = ifp->if_softc;
 	struct hv_device *device_ctx = vmbus_get_devctx(sc->hn_dev);
 
-	if ((ifp->if_drv_flags & (IFF_DRV_RUNNING | IFF_DRV_OACTIVE)) !=
+	*haspkt = 0;
+	if ((ifp->if_drv_flags & (IFF_DRV_RUNNING | oactflag)) !=
 	    IFF_DRV_RUNNING)
 		return 0;
 
@@ -1016,6 +1018,7 @@ hn_start_locked(struct ifnet *ifp, int len)
 		IFQ_DRV_DEQUEUE(&ifp->if_snd, m_head);
 		if (m_head == NULL)
 			break;
+		*haspkt = 1;
 
 		if (len > 0 && m_head->m_pkthdr.len > len) {
 			/*
@@ -1609,9 +1612,10 @@ hn_start(struct ifnet *ifp)
 		goto do_sched;
 
 	if (NV_TRYLOCK(sc)) {
-		int sched;
+		int sched, haspkt;
 
-		sched = hn_start_locked(ifp, sc->hn_direct_tx_size);
+		sched = hn_start_locked(ifp, sc->hn_direct_tx_size, &haspkt,
+		    IFF_DRV_OACTIVE);
 		NV_UNLOCK(sc);
 		if (!sched)
 			return;
@@ -1629,10 +1633,11 @@ hn_start_txeof(struct ifnet *ifp)
 		goto do_sched;
 
 	if (NV_TRYLOCK(sc)) {
-		int sched;
+		int sched, haspkt;
 
 		atomic_clear_int(&ifp->if_drv_flags, IFF_DRV_OACTIVE);
-		sched = hn_start_locked(ifp, sc->hn_direct_tx_size);
+		sched = hn_start_locked(ifp, sc->hn_direct_tx_size, &haspkt,
+		    IFF_DRV_OACTIVE);
 		NV_UNLOCK(sc);
 		if (sched) {
 			taskqueue_enqueue_fast(sc->hn_tx_taskq,
@@ -2030,9 +2035,10 @@ static void
 hn_start_taskfunc(void *xsc, int pending __unused)
 {
 	struct hn_softc *sc = xsc;
+	int haspkt;
 
 	NV_LOCK(sc);
-	hn_start_locked(sc->hn_ifp, 0);
+	hn_start_locked(sc->hn_ifp, 0, &haspkt, IFF_DRV_OACTIVE);
 	NV_UNLOCK(sc);
 }
 
@@ -2041,10 +2047,11 @@ hn_txeof_taskfunc(void *xsc, int pending __unused)
 {
 	struct hn_softc *sc = xsc;
 	struct ifnet *ifp = sc->hn_ifp;
+	int haspkt;
 
 	NV_LOCK(sc);
 	atomic_clear_int(&ifp->if_drv_flags, IFF_DRV_OACTIVE);
-	hn_start_locked(ifp, 0);
+	hn_start_locked(ifp, 0, &haspkt, IFF_DRV_OACTIVE);
 	NV_UNLOCK(sc);
 }
 
