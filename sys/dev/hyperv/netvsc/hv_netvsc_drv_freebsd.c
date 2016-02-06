@@ -267,6 +267,17 @@ static void hn_start_taskfunc(void *xsc, int pending);
 static void hn_txeof_taskfunc(void *xsc, int pending);
 static int hn_encap(struct hn_softc *, struct hn_txdesc *, struct mbuf **);
 
+static void hn_start_spin_taskfunc(void *xsc, int pending);
+static void hn_start_more_taskfunc(void *xsc, int pending);
+
+static __inline void
+hn_start_turbo(struct hn_softc *sc)
+{
+	if (atomic_cmpset_int(&sc->hn_tx_started, 0, 1) == 0)
+		return;
+	taskqueue_enqueue_fast(sc->hn_tx_taskq, &sc->hn_txspin_task);
+}
+
 static int
 hn_ifmedia_upd(struct ifnet *ifp __unused)
 {
@@ -369,6 +380,10 @@ netvsc_attach(device_t dev)
 	}
 	TASK_INIT(&sc->hn_start_task, 0, hn_start_taskfunc, sc);
 	TASK_INIT(&sc->hn_txeof_task, 0, hn_txeof_taskfunc, sc);
+
+	TASK_INIT(&sc->hn_txspin_task, 0, hn_start_spin_taskfunc, sc);
+	TASK_INIT(&sc->hn_txmore_task, 0, hn_start_more_taskfunc, sc);
+	sc->hn_txspin_max = 50;
 
 	error = hn_create_tx_ring(sc);
 	if (error)
@@ -534,6 +549,12 @@ netvsc_attach(device_t dev)
 	    CTLFLAG_RW, &sc->hn_sched_tx, 0,
 	    "Always schedule transmission "
 	    "instead of doing direct transmission");
+	SYSCTL_ADD_INT(ctx, child, OID_AUTO, "txspin_max",
+	    CTLFLAG_RW, &sc->hn_txspin_max, 0, "");
+	SYSCTL_ADD_INT(ctx, child, OID_AUTO, "txspin_cnt",
+	    CTLFLAG_RD, &sc->hn_txspin_cnt, 0, "");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "tx_started",
+	    CTLFLAG_RD, __DEVOLATILE(u_int *, &sc->hn_tx_started), 0, "");
 
 	if (unit == 0) {
 		struct sysctl_ctx_list *dc_ctx;
@@ -1034,7 +1055,10 @@ hn_start_locked(struct ifnet *ifp, int len, int *haspkt, int oactflag)
 		if (txd == NULL) {
 			sc->hn_no_txdescs++;
 			IF_PREPEND(&ifp->if_snd, m_head);
-			atomic_set_int(&ifp->if_drv_flags, IFF_DRV_OACTIVE);
+			if (oactflag) {
+				atomic_set_int(&ifp->if_drv_flags,
+				    IFF_DRV_OACTIVE);
+			}
 			break;
 		}
 
@@ -1090,7 +1114,10 @@ again:
 
 			sc->hn_send_failed++;
 			IF_PREPEND(&ifp->if_snd, m_head);
-			atomic_set_int(&ifp->if_drv_flags, IFF_DRV_OACTIVE);
+			if (oactflag) {
+				atomic_set_int(&ifp->if_drv_flags,
+				    IFF_DRV_OACTIVE);
+			}
 			break;
 		}
 	}
@@ -1608,8 +1635,13 @@ hn_start(struct ifnet *ifp)
 {
 	struct hn_softc *sc = ifp->if_softc;
 
-	if (sc->hn_sched_tx)
+	if (sc->hn_sched_tx) {
+		if (sc->hn_sched_tx > 1) {
+			hn_start_turbo(sc);
+			return;
+		}
 		goto do_sched;
+	}
 
 	if (NV_TRYLOCK(sc)) {
 		int sched, haspkt;
@@ -1629,8 +1661,13 @@ hn_start_txeof(struct ifnet *ifp)
 {
 	struct hn_softc *sc = ifp->if_softc;
 
-	if (sc->hn_sched_tx)
+	if (sc->hn_sched_tx) {
+		if (sc->hn_sched_tx > 1) {
+			hn_start_turbo(sc);
+			return;
+		}
 		goto do_sched;
+	}
 
 	if (NV_TRYLOCK(sc)) {
 		int sched, haspkt;
@@ -2029,6 +2066,44 @@ hn_destroy_tx_ring(struct hn_softc *sc)
 		bus_dma_tag_destroy(sc->hn_tx_rndis_dtag);
 	free(sc->hn_txdesc, M_NETVSC);
 	mtx_destroy(&sc->hn_txlist_spin);
+}
+
+static void
+hn_start_more_taskfunc(void *xsc, int pending __unused)
+{
+	struct hn_softc *sc = xsc;
+	struct ifnet *ifp = sc->hn_ifp;
+	int haspkt;
+
+	NV_LOCK(sc);
+	hn_start_locked(ifp, 0, &haspkt, 0);
+	NV_UNLOCK(sc);
+
+	if (haspkt && sc->hn_txdesc_avail)
+		hn_start_turbo(sc);
+}
+
+static void
+hn_start_spin_taskfunc(void *xsc, int pending __unused)
+{
+	struct hn_softc *sc = xsc;
+	struct ifnet *ifp = sc->hn_ifp;
+	int haspkt;
+
+	NV_LOCK(sc);
+	hn_start_locked(ifp, 0, &haspkt, 0);
+	NV_UNLOCK(sc);
+
+	if ((haspkt && sc->hn_txdesc_avail) || sc->hn_txspin_cnt == 0)
+		sc->hn_txspin_cnt = sc->hn_txspin_max;
+	else
+		sc->hn_txspin_cnt--;
+	if (sc->hn_txspin_cnt == 0) {
+		atomic_clear_int(&sc->hn_tx_started, 1);
+		taskqueue_enqueue_fast(sc->hn_tx_taskq, &sc->hn_txmore_task);
+	} else {
+		taskqueue_enqueue_fast(sc->hn_tx_taskq, &sc->hn_txspin_task);
+	}
 }
 
 static void

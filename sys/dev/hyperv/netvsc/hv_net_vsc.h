@@ -1024,10 +1024,14 @@ typedef struct hn_softc {
 	int		hn_txeof;
 
 	int		hn_sched_tx;
+	u_int		hn_txspin_cnt;
+	u_int		hn_txspin_max;
 	int		hn_direct_tx_size;
 	struct taskqueue *hn_tx_taskq;
 	struct task	hn_start_task;
 	struct task	hn_txeof_task;
+	struct task	hn_txspin_task;
+	struct task	hn_txmore_task;
 
 	struct lro_ctrl	hn_lro;
 
@@ -1045,6 +1049,8 @@ typedef struct hn_softc {
 	u_long		hn_txdma_failed;
 	u_long		hn_tx_collapsed;
 	u_long		hn_tx_chimney;
+
+	volatile u_int	hn_tx_started __aligned(CACHE_LINE_SIZE);
 } hn_softc_t;
 
 #define HN_TRUST_HCSUM_IP	0x0001
