@@ -2567,10 +2567,14 @@ hn_transmit(struct ifnet *ifp, struct mbuf *m)
 {
 	struct hn_softc *sc = ifp->if_softc;
 	struct hn_tx_ring *txr;
-	int error;
+	int error, idx = 0;
 
-	/* TODO: vRSS, TX ring selection */
-	txr = &sc->hn_tx_ring[0];
+	/*
+	 * Select the TX ring based on flowid
+	 */
+	if (M_HASHTYPE_GET(m) != M_HASHTYPE_NONE)
+		idx = m->m_pkthdr.flowid % sc->hn_tx_ring_cnt;
+	txr = &sc->hn_tx_ring[idx];
 
 	error = drbr_enqueue(ifp, txr->hn_mbuf_br, m);
 	if (error)
