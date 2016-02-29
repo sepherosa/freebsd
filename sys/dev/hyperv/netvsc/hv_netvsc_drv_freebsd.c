@@ -1287,6 +1287,9 @@ skip:
 		m_new->m_flags |= M_VLANTAG;
 	}
 
+	m_new->m_pkthdr.flowid = rxr->hn_rx_idx;
+	M_HASHTYPE_SET(m_new, M_HASHTYPE_OPAQUE);
+
 	/*
 	 * Note:  Moved RX completion back to hv_nv_on_receive() so all
 	 * messages (not just data messages) will trigger a response.
@@ -2037,6 +2040,7 @@ hn_create_rx_data(struct hn_softc *sc)
 		if (hn_trust_hostip)
 			rxr->hn_trust_hcsum |= HN_TRUST_HCSUM_IP;
 		rxr->hn_ifp = sc->hn_ifp;
+		rxr->hn_rx_idx = i;
 
 		/*
 		 * Initialize LRO.
