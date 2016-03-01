@@ -763,6 +763,11 @@ hn_encap(struct hn_tx_ring *txr, struct hn_txdesc *txd, struct mbuf **m_head0)
 
 	rndis_msg_size = RNDIS_MESSAGE_SIZE(rndis_packet);
 
+	/*
+	 * Set the hash info for this packet, so that the host could
+	 * dispatch the TX done event for this packet back to this TX
+	 * ring's channel.
+	 */
 	rndis_msg_size += RNDIS_HASH_PPI_SIZE;
 	rppi = hv_set_rppi_data(rndis_mesg, RNDIS_HASH_PPI_SIZE,
 	    nbl_hash_value);
