@@ -274,6 +274,21 @@ vmbus_channel_process_offer(hv_vmbus_channel *new_channel)
 	}
 }
 
+static void
+vmbus_channel_cpu_set(struct hv_vmbus_channel *chan, int cpu)
+{
+	KASSERT(cpu >= 0 && cpu < mp_ncpus, ("invalid cpu %d", cpu));
+
+	chan->target_cpu = cpu;
+	chan->target_vcpu = hv_vmbus_g_context.hv_vcpu_index[cpu];
+
+	if (bootverbose) {
+		printf("vmbus_chan%u: assigned to cpu%u [vcpu%u]\n",
+		    chan->offer_msg.child_rel_id,
+		    chan->target_cpu, chan->target_vcpu);
+	}
+}
+
 /**
  * Array of device guids that are performance critical. We try to distribute
  * the interrupt load for these devices across all online cpus. 
@@ -323,21 +338,13 @@ vmbus_channel_select_cpu(hv_vmbus_channel *channel, hv_guid *guid)
 	if ((hv_vmbus_protocal_version == HV_VMBUS_VERSION_WS2008) ||
 	    (hv_vmbus_protocal_version == HV_VMBUS_VERSION_WIN7) ||
 	    (!is_perf_channel)) {
-		/* Host's view of guest cpu */
-		channel->target_vcpu = 0;
-		/* Guest's own view of cpu */
-		channel->target_cpu = 0;
+		/* Stick to cpu0 */
+		vmbus_channel_cpu_set(channel, 0);
 		return;
 	}
 	/* mp_ncpus should have the number cpus currently online */
 	current_cpu = (++next_vcpu % mp_ncpus);
-	channel->target_cpu = current_cpu;
-	channel->target_vcpu =
-	    hv_vmbus_g_context.hv_vcpu_index[current_cpu];
-	if (bootverbose)
-		printf("VMBUS: Total online cpus %d, assign perf channel %d "
-		    "to vcpu %d, cpu %d\n", mp_ncpus, i, channel->target_vcpu,
-		    current_cpu);
+	vmbus_channel_cpu_set(channel, current_cpu);
 }
 
 /**
