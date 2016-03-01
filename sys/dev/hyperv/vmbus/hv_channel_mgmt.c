@@ -321,11 +321,12 @@ static uint32_t next_vcpu;
  * distributed across all available CPUs.
  */
 static void
-vmbus_channel_select_cpu(hv_vmbus_channel *channel, hv_guid *guid)
+vmbus_channel_select_defcpu(struct hv_vmbus_channel *channel)
 {
 	uint32_t current_cpu;
 	int i;
 	boolean_t is_perf_channel = FALSE;
+	const hv_guid *guid = &channel->offer_msg.offer.interface_type;
 
 	for (i = PERF_CHN_NIC; i < MAX_PERF_CHN; i++) {
 		if (memcmp(guid->data, high_perf_devices[i].data,
@@ -415,16 +416,13 @@ vmbus_channel_on_offer_internal(void* context)
 		    offer->connection_id;
 	}
 
-	/*
-	 * Bind the channel to a chosen cpu.
-	 */
-	vmbus_channel_select_cpu(new_channel,
-	    &offer->offer.interface_type);
-
 	memcpy(&new_channel->offer_msg, offer,
 	    sizeof(hv_vmbus_channel_offer_channel));
 	new_channel->monitor_group = (uint8_t) offer->monitor_id / 32;
 	new_channel->monitor_bit = (uint8_t) offer->monitor_id % 32;
+
+	/* Select default cpu for this channel. */
+	vmbus_channel_select_defcpu(new_channel);
 
 	vmbus_channel_process_offer(new_channel);
 
