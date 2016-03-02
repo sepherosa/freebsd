@@ -683,6 +683,7 @@ hv_nv_subchan_callback(void *xchan)
 	}
 	netvsc_subchan_callback(sc, chan);
 
+	chan->hv_chan_rdbuf = malloc(NETVSC_PACKET_SIZE, M_NETVSC, M_WAITOK);
 	ret = hv_vmbus_channel_open(chan, NETVSC_DEVICE_RING_BUFFER_SIZE,
 	    NETVSC_DEVICE_RING_BUFFER_SIZE, NULL, 0,
 	    hv_nv_on_channel_callback, chan);
