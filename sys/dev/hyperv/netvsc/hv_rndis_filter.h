@@ -68,12 +68,15 @@ typedef struct rndis_request_ {
 	 * response message or add a response buffer variable above this field
 	 */
 	rndis_msg			response_msg;
+	uint8_t				buf_resp[PAGE_SIZE];
 
 	/* Simplify allocation by having a netvsc packet inline */
 	netvsc_packet			pkt;
 	hv_vmbus_page_buffer		buffer;
 	/* Fixme:  We assumed a fixed size request here. */
 	rndis_msg			request_msg;
+	uint8_t				buf_req[PAGE_SIZE];
+
 	/* Fixme:  Poor man's semaphore. */
 	uint32_t			halt_complete_flag;
 } rndis_request;
