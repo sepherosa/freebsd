@@ -476,7 +476,7 @@ hv_ring_buffer_read(
 	 * the writer may start writing to the read area once the read index
 	 * is updated.
 	 */
-	atomic_thread_fence_seq_cst();
+	wmb();
 
 	/*
 	 * Update the read index
