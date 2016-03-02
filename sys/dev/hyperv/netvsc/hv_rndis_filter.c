@@ -965,32 +965,6 @@ hv_rf_close_device(rndis_device *device)
 }
 
 /*
- * Callback handler for subchannel offer
- * @@param context new subchannel
- */
-static void
-netvsc_handle_sc_creation(void *context)
-{
-	hv_vmbus_channel *new_sc = (hv_vmbus_channel *)context;
-	netvsc_dev *net_dev;
-	uint16_t chn_index = new_sc->offer_msg.offer.sub_channel_index;
-	struct hv_device *device = new_sc->device;
-	hn_softc_t *sc = device_get_softc(device->device);
-	int ret;
-
-	net_dev = sc->net_dev;
-
-	if (chn_index >= net_dev->num_channel) {
-		/* Would this ever happen? */
-		return;
-	}
-
-	ret = hv_vmbus_channel_open(new_sc, NETVSC_DEVICE_RING_BUFFER_SIZE,
-	    NETVSC_DEVICE_RING_BUFFER_SIZE, NULL, 0,
-	    hv_nv_on_channel_callback, new_sc);
-}
-
-/*
  * RNDIS filter on device add
  */
 int
@@ -1093,8 +1067,6 @@ hv_rf_on_device_add(struct hv_device *device, void *additl_info,
 		goto out;
 	}
 	
-	device->channel->sc_creation_callback = netvsc_handle_sc_creation;
-
 	/* request host to create sub channels */
 	init_pkt = &net_dev->channel_init_packet;
 	memset(init_pkt, 0, sizeof(nvsp_msg));

@@ -2731,6 +2731,32 @@ hn_xmit_txeof_taskfunc(void *xtxr, int pending __unused)
 	mtx_unlock(&txr->hn_tx_lock);
 }
 
+void
+netvsc_subchan_callback(struct hn_softc *sc, struct hv_vmbus_channel *chan)
+{
+	int idx;
+
+	KASSERT(!HV_VMBUS_CHAN_ISPRIMARY(chan),
+	    ("subchannel callback on primary channel"));
+
+	idx = chan->offer_msg.offer.sub_channel_index;
+
+	KASSERT(idx > 0 && idx < sc->hn_rx_ring_inuse,
+	    ("invalid channel index %d, should > 0 && < %d",
+	     idx, sc->hn_rx_ring_inuse));
+	chan->hv_chan_rxr = &sc->hn_rx_ring[idx];
+	if_printf(sc->hn_ifp, "link RX ring %d to channel%u\n",
+	    idx, chan->offer_msg.child_rel_id);
+
+	if (idx < sc->hn_tx_ring_inuse) {
+		chan->hv_chan_txr = &sc->hn_tx_ring[idx];
+		sc->hn_tx_ring[idx].hn_chan = chan;
+		if_printf(sc->hn_ifp, "link TX ring %d to channel%u\n",
+		    idx, chan->offer_msg.child_rel_id);
+	}
+	/* TODO: vRSS bind cpu */
+}
+
 static void
 hn_tx_taskq_create(void *arg __unused)
 {
