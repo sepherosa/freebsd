@@ -502,10 +502,17 @@ netvsc_attach(device_t dev)
 	error = hv_rf_on_device_add(device_ctx, &device_info, ring_cnt);
 	if (error)
 		goto failed;
+	KASSERT(sc->net_dev->num_channel <= ring_cnt,
+	    ("invalid channel count %u, should be less than %d",
+	     sc->net_dev->num_channel, ring_cnt));
 
-	/* TODO: vRSS */
-	sc->hn_tx_ring_inuse = 1;
-	sc->hn_rx_ring_inuse = 1;
+	/*
+	 * Set # of TX/RX rings that could be used according to
+	 * the # of channels that host offered.
+	 */
+	if (sc->hn_tx_ring_inuse > sc->net_dev->num_channel)
+		sc->hn_tx_ring_inuse = sc->net_dev->num_channel;
+	sc->hn_rx_ring_inuse = sc->net_dev->num_channel;
 	device_printf(dev, "%d TX ring, %d RX ring\n",
 	    sc->hn_tx_ring_inuse, sc->hn_rx_ring_inuse);
 

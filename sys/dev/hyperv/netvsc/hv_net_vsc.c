@@ -57,7 +57,6 @@ MALLOC_DEFINE(M_NETVSC, "netvsc", "Hyper-V netvsc driver");
 /*
  * Forward declarations
  */
-static void hv_nv_on_channel_callback(void *context);
 static int  hv_nv_init_send_buffer_with_net_vsp(struct hv_device *device);
 static int  hv_nv_init_rx_buffer_with_net_vsp(struct hv_device *device);
 static int  hv_nv_destroy_send_buffer(netvsc_dev *net_dev);
@@ -770,7 +769,9 @@ hv_nv_on_send_completion(netvsc_dev *net_dev,
 		|| nvsp_msg_pkt->hdr.msg_type
 			== nvsp_msg_1_type_send_rx_buf_complete
 		|| nvsp_msg_pkt->hdr.msg_type
-			== nvsp_msg_1_type_send_send_buf_complete) {
+			== nvsp_msg_1_type_send_send_buf_complete
+		|| nvsp_msg_pkt->hdr.msg_type
+			== nvsp_msg5_type_subchannel) {
 		/* Copy the response back */
 		memcpy(&net_dev->channel_init_packet, nvsp_msg_pkt,
 		    sizeof(nvsp_msg));
@@ -964,9 +965,49 @@ retry_send_cmplt:
 }
 
 /*
- * Net VSC on channel callback
+ * Net VSC receiving vRSS send table from VSP
  */
 static void
+hv_nv_send_table(struct hv_device *device, hv_vm_packet_descriptor *pkt)
+{
+	netvsc_dev *net_dev;
+	nvsp_msg *nvsp_msg_pkt;
+	int i;
+	uint32_t count, *table;
+
+	net_dev = hv_nv_get_inbound_net_device(device);
+	if (!net_dev)
+        	return;
+
+	nvsp_msg_pkt =
+	    (nvsp_msg *)((unsigned long)pkt + (pkt->data_offset8 << 3));
+
+	if (nvsp_msg_pkt->hdr.msg_type !=
+	    nvsp_msg5_type_send_indirection_table) {
+		printf("Netvsc: !Warning! receive msg type not "
+			"send_indirection_table. type = %d\n",
+			nvsp_msg_pkt->hdr.msg_type);
+		return;
+	}
+
+	count = nvsp_msg_pkt->msgs.vers_5_msgs.send_table.count;
+	if (count != VRSS_SEND_TABLE_SIZE) {
+        	printf("Netvsc: Received wrong send table size: %u\n", count);
+	        return;
+	}
+
+	table = (uint32_t *)
+	    ((unsigned long)&nvsp_msg_pkt->msgs.vers_5_msgs.send_table +
+	     nvsp_msg_pkt->msgs.vers_5_msgs.send_table.offset);
+
+	for (i = 0; i < count; i++)
+        	net_dev->vrss_send_table[i] = table[i];
+}
+
+/*
+ * Net VSC on channel callback
+ */
+void
 hv_nv_on_channel_callback(void *xchan)
 {
 	struct hv_vmbus_channel *chan = xchan;
@@ -998,6 +1039,9 @@ hv_nv_on_channel_callback(void *xchan)
 					break;
 				case HV_VMBUS_PACKET_TYPE_DATA_USING_TRANSFER_PAGES:
 					hv_nv_on_receive(net_dev, device, chan, desc);
+					break;
+				case HV_VMBUS_PACKET_TYPE_DATA_IN_BAND:
+					hv_nv_send_table(device, desc);
 					break;
 				default:
 					device_printf(dev,

@@ -167,6 +167,14 @@
 #define RNDIS_OID_GEN_MACHINE_NAME                      0x0001021A
 #define RNDIS_OID_GEN_RNDIS_CONFIG_PARAMETER            0x0001021B
 
+/*
+ * For receive side scale
+ */
+/* Query only */
+#define RNDIS_OID_GEN_RSS_CAPABILITIES			0x00010203
+/* Query and set */
+#define RNDIS_OID_GEN_RSS_PARAMETERS			0x00010204
+
 #define RNDIS_OID_GEN_XMIT_OK                           0x00020101
 #define RNDIS_OID_GEN_RCV_OK                            0x00020102
 #define RNDIS_OID_GEN_XMIT_ERROR                        0x00020103
