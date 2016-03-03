@@ -1344,6 +1344,7 @@ skip:
 	 */
 
 	if_inc_counter(ifp, IFCOUNTER_IPACKETS, 1);
+	rxr->hn_pkts++;
 
 	if ((ifp->if_capenable & IFCAP_LRO) && do_lro) {
 #if defined(INET) || defined(INET6)
@@ -2081,6 +2082,13 @@ hn_create_rx_data(struct hn_softc *sc, int ring_cnt)
 #endif
 #endif	/* INET || INET6 */
 
+	ctx = device_get_sysctl_ctx(dev);
+	child = SYSCTL_CHILDREN(device_get_sysctl_tree(dev));
+
+	/* Create dev.hn.UNIT.rx sysctl tree */
+	sc->hn_rx_sysctl_tree = SYSCTL_ADD_NODE(ctx, child, OID_AUTO, "rx",
+	    CTLFLAG_RD, 0, "");
+
 	for (i = 0; i < sc->hn_rx_ring_cnt; ++i) {
 		struct hn_rx_ring *rxr = &sc->hn_rx_ring[i];
 
@@ -2108,10 +2116,27 @@ hn_create_rx_data(struct hn_softc *sc, int ring_cnt)
 		rxr->hn_lro.lro_ackcnt_lim = HN_LRO_ACKCNT_DEF;
 #endif
 #endif	/* INET || INET6 */
-	}
 
-	ctx = device_get_sysctl_ctx(dev);
-	child = SYSCTL_CHILDREN(device_get_sysctl_tree(dev));
+		if (sc->hn_rx_sysctl_tree != NULL) {
+			char name[16];
+
+			/*
+			 * Create per RX ring sysctl tree:
+			 * dev.hn.UNIT.rx.RINGID
+			 */
+			snprintf(name, sizeof(name), "%d", i);
+			rxr->hn_rx_sysctl_tree = SYSCTL_ADD_NODE(ctx,
+			    SYSCTL_CHILDREN(sc->hn_rx_sysctl_tree),
+			    OID_AUTO, name, CTLFLAG_RD, 0, "");
+
+			if (rxr->hn_rx_sysctl_tree != NULL) {
+				SYSCTL_ADD_ULONG(ctx,
+				    SYSCTL_CHILDREN(rxr->hn_rx_sysctl_tree),
+				    OID_AUTO, "packets", CTLFLAG_RD,
+				    &rxr->hn_pkts, "# of packets received");
+			}
+		}
+	}
 
 	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "lro_queued",
 	    CTLTYPE_U64 | CTLFLAG_RW, sc,

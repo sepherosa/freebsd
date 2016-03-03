@@ -1162,6 +1162,10 @@ struct hn_rx_ring {
 	u_long		hn_csum_trusted;
 	u_long		hn_lro_tried;
 	u_long		hn_small_pkts;
+	u_long		hn_pkts;
+
+	/* Rarely used stuffs */
+	struct sysctl_oid *hn_rx_sysctl_tree;
 } __aligned(CACHE_LINE_SIZE);
 
 #define HN_TRUST_HCSUM_IP	0x0001
@@ -1236,9 +1240,11 @@ typedef struct hn_softc {
 	int		hn_tx_ring_cnt;
 	int		hn_tx_ring_inuse;
 	struct hn_tx_ring *hn_tx_ring;
+
 	int		hn_tx_chimney_max;
 	struct taskqueue *hn_tx_taskq;
 	struct sysctl_oid *hn_tx_sysctl_tree;
+	struct sysctl_oid *hn_rx_sysctl_tree;
 } hn_softc_t;
 
 /*
