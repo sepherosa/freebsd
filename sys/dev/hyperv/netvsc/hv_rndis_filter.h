@@ -79,6 +79,9 @@ typedef struct rndis_request_ {
 	/*
 	 * The max request size is sizeof(rndis_msg) + PAGE_SIZE.
 	 *
+	 * NOTE:
+	 * This is required for the large request like RSS settings.
+	 *
 	 * XXX
 	 * This is ugly and should be cleaned up once we busdma-fy
 	 * RNDIS request bits.
