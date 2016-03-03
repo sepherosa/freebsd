@@ -1241,6 +1241,7 @@ typedef struct hn_softc {
 	int		hn_tx_ring_inuse;
 	struct hn_tx_ring *hn_tx_ring;
 
+	int		hn_cpu;
 	int		hn_tx_chimney_max;
 	struct taskqueue *hn_tx_taskq;
 	struct sysctl_oid *hn_tx_sysctl_tree;

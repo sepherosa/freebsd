@@ -287,6 +287,8 @@ static int hn_single_tx_ring = 1;
 SYSCTL_INT(_hw_hn, OID_AUTO, single_tx_ring, CTLFLAG_RDTUN,
     &hn_single_tx_ring, 0, "Use one TX ring");
 
+static u_int hn_cpu_index;
+
 /*
  * Forward declarations
  */
@@ -438,6 +440,7 @@ netvsc_attach(device_t dev)
 	ring_cnt = hn_ring_cnt;
 	if (ring_cnt <= 0 || ring_cnt >= mp_ncpus)
 		ring_cnt = mp_ncpus;
+	sc->hn_cpu = atomic_fetchadd_int(&hn_cpu_index, ring_cnt) % mp_ncpus;
 
 	tx_ring_cnt = ring_cnt;
 	if (hn_single_tx_ring || hn_use_if_start) {
@@ -461,6 +464,7 @@ netvsc_attach(device_t dev)
 	chan->hv_chan_rxr = &sc->hn_rx_ring[0];
 	chan->hv_chan_txr = &sc->hn_tx_ring[0];
 	sc->hn_tx_ring[0].hn_chan = chan;
+	vmbus_channel_cpu_set(chan, sc->hn_cpu);
 
 	if_initname(ifp, device_get_name(dev), device_get_unit(dev));
 	ifp->if_dunit = unit;
@@ -2765,10 +2769,11 @@ netvsc_subchan_callback(struct hn_softc *sc, struct hv_vmbus_channel *chan)
 	    ("subchannel callback on primary channel"));
 
 	idx = chan->offer_msg.offer.sub_channel_index;
-
 	KASSERT(idx > 0 && idx < sc->hn_rx_ring_inuse,
 	    ("invalid channel index %d, should > 0 && < %d",
 	     idx, sc->hn_rx_ring_inuse));
+	vmbus_channel_cpu_set(chan, (sc->hn_cpu + idx) % mp_ncpus);
+
 	chan->hv_chan_rxr = &sc->hn_rx_ring[idx];
 	if_printf(sc->hn_ifp, "link RX ring %d to channel%u\n",
 	    idx, chan->offer_msg.child_rel_id);
@@ -2779,7 +2784,6 @@ netvsc_subchan_callback(struct hn_softc *sc, struct hv_vmbus_channel *chan)
 		if_printf(sc->hn_ifp, "link TX ring %d to channel%u\n",
 		    idx, chan->offer_msg.child_rel_id);
 	}
-	/* TODO: vRSS bind cpu */
 }
 
 static void
