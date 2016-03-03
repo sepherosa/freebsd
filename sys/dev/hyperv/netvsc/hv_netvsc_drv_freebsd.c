@@ -2132,7 +2132,7 @@ hn_create_rx_data(struct hn_softc *sc, int ring_cnt)
 			if (rxr->hn_rx_sysctl_tree != NULL) {
 				SYSCTL_ADD_ULONG(ctx,
 				    SYSCTL_CHILDREN(rxr->hn_rx_sysctl_tree),
-				    OID_AUTO, "packets", CTLFLAG_RD,
+				    OID_AUTO, "packets", CTLFLAG_RW,
 				    &rxr->hn_pkts, "# of packets received");
 			}
 		}
