@@ -519,6 +519,11 @@ netvsc_attach(device_t dev)
 	device_printf(dev, "%d TX ring, %d RX ring\n",
 	    sc->hn_tx_ring_inuse, sc->hn_rx_ring_inuse);
 
+	if (sc->hn_tx_ring_inuse > 1) {
+		sc->hn_tx_ring[0].hn_tx_taskq = chan->rxq;
+		if_printf(sc->hn_ifp, "bind tx taskq to channel event\n");
+	}
+
 	if (device_info.link_state == 0) {
 		sc->hn_carrier = 1;
 	}
@@ -2815,6 +2820,15 @@ netvsc_subchan_callback(struct hn_softc *sc, struct hv_vmbus_channel *chan)
 	    ("invalid channel subidx %u",
 	     chan->offer_msg.offer.sub_channel_index));
 	hn_channel_attach(sc, chan);
+}
+
+void
+netvsc_subchan_post_callback(struct hn_softc *sc, struct hv_vmbus_channel *chan)
+{
+	if (sc->hn_tx_ring_inuse > 1 && chan->hv_chan_txr != NULL) {
+		((struct hn_tx_ring *)chan->hv_chan_txr)->hn_tx_taskq = chan->rxq;
+		if_printf(sc->hn_ifp, "bind tx taskq to channel event\n");
+	}
 }
 
 static void

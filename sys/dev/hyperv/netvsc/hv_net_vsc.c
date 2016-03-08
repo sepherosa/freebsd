@@ -687,6 +687,8 @@ hv_nv_subchan_callback(void *xchan)
 	ret = hv_vmbus_channel_open(chan, NETVSC_DEVICE_RING_BUFFER_SIZE,
 	    NETVSC_DEVICE_RING_BUFFER_SIZE, NULL, 0,
 	    hv_nv_on_channel_callback, chan);
+
+	netvsc_subchan_post_callback(sc, chan);
 }
 
 /*
