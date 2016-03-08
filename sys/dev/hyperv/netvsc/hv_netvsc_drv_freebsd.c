@@ -331,6 +331,8 @@ static int hn_xmit(struct hn_tx_ring *, int);
 static void hn_xmit_txeof(struct hn_tx_ring *);
 static void hn_xmit_taskfunc(void *, int);
 static void hn_xmit_txeof_taskfunc(void *, int);
+static void hn_xmit_txeof_direct(struct hn_tx_ring *);
+static void hn_panic_taskfunc(void *, int);
 
 static int
 hn_ifmedia_upd(struct ifnet *ifp __unused)
@@ -519,10 +521,7 @@ netvsc_attach(device_t dev)
 	device_printf(dev, "%d TX ring, %d RX ring\n",
 	    sc->hn_tx_ring_inuse, sc->hn_rx_ring_inuse);
 
-	if (sc->hn_tx_ring_inuse > 1) {
-		sc->hn_tx_ring[0].hn_tx_taskq = chan->rxq;
-		if_printf(sc->hn_ifp, "bind tx taskq to channel event\n");
-	}
+	netvsc_subchan_post_callback(sc, chan);
 
 	if (device_info.link_state == 0) {
 		sc->hn_carrier = 1;
@@ -764,7 +763,13 @@ netvsc_channel_rollup(struct hv_vmbus_channel *chan)
 	 * 'txr' could be NULL, if multiple channels and
 	 * ifnet.if_start method are enabled.
 	 */
-	if (txr == NULL || !txr->hn_has_txeof)
+	if (txr == NULL)
+		return;
+
+	if (__predict_false(txr->hn_txeof_td == NULL))
+		txr->hn_txeof_td = curthread;
+
+	if (!txr->hn_has_txeof)
 		return;
 
 	txr->hn_has_txeof = 0;
@@ -2688,6 +2693,13 @@ hn_transmit(struct ifnet *ifp, struct mbuf *m)
 	if (txr->hn_oactive)
 		return 0;
 
+	if (txr->hn_txeof_td == curthread) {
+		mtx_lock(&txr->hn_tx_lock);
+		hn_xmit(txr, 0);
+		mtx_unlock(&txr->hn_tx_lock);
+		return 0;
+	}
+
 	if (txr->hn_sched_tx)
 		goto do_sched;
 
@@ -2753,6 +2765,19 @@ do_sched:
 }
 
 static void
+hn_xmit_txeof_direct(struct hn_tx_ring *txr)
+{
+
+	KASSERT(txr->hn_txeof_td == NULL || txr->hn_txeof_td == curthread,
+	    ("not in taskqueue thread"));
+
+	mtx_lock(&txr->hn_tx_lock);
+	txr->hn_oactive = 0;
+	hn_xmit(txr, 0);
+	mtx_unlock(&txr->hn_tx_lock);
+}
+
+static void
 hn_xmit_taskfunc(void *xtxr, int pending __unused)
 {
 	struct hn_tx_ring *txr = xtxr;
@@ -2765,12 +2790,15 @@ hn_xmit_taskfunc(void *xtxr, int pending __unused)
 static void
 hn_xmit_txeof_taskfunc(void *xtxr, int pending __unused)
 {
-	struct hn_tx_ring *txr = xtxr;
 
-	mtx_lock(&txr->hn_tx_lock);
-	txr->hn_oactive = 0;
-	hn_xmit(txr, 0);
-	mtx_unlock(&txr->hn_tx_lock);
+	hn_xmit_txeof_direct(xtxr);
+}
+
+static void
+hn_panic_taskfunc(void *arg __unused, int pending __unused)
+{
+
+	panic("%s is called", __func__);
 }
 
 static void
@@ -2826,8 +2854,14 @@ void
 netvsc_subchan_post_callback(struct hn_softc *sc, struct hv_vmbus_channel *chan)
 {
 	if (sc->hn_tx_ring_inuse > 1 && chan->hv_chan_txr != NULL) {
-		((struct hn_tx_ring *)chan->hv_chan_txr)->hn_tx_taskq = chan->rxq;
-		if_printf(sc->hn_ifp, "bind tx taskq to channel event\n");
+		struct hn_tx_ring *txr = chan->hv_chan_txr;
+
+		txr->hn_tx_taskq = chan->rxq;
+		txr->hn_txeof = hn_xmit_txeof_direct;
+		TASK_INIT(&txr->hn_txeof_task, 0, hn_panic_taskfunc, txr);
+		if_printf(sc->hn_ifp,
+		    "bind TX ring %d taskq to taskqueue thread %p\n",
+		    txr->hn_tx_idx, txr->hn_txeof_td);
 	}
 }
 

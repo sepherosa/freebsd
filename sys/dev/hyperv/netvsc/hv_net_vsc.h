@@ -1193,6 +1193,8 @@ struct hn_tx_ring {
 	struct task	hn_tx_task;
 	struct task	hn_txeof_task;
 
+	struct thread	*hn_txeof_td;
+
 	struct buf_ring	*hn_mbuf_br;
 	int		hn_oactive;
 	int		hn_tx_idx;
