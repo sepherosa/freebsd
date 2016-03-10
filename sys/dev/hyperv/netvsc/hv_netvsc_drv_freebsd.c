@@ -531,6 +531,7 @@ netvsc_attach(device_t dev)
 	device_printf(dev, "%d TX ring, %d RX ring\n",
 	    sc->hn_tx_ring_inuse, sc->hn_rx_ring_inuse);
 
+#if __FreeBSD_version >= 1100099
 	if (sc->hn_rx_ring_inuse > 1) {
 		int i;
 
@@ -543,6 +544,7 @@ netvsc_attach(device_t dev)
 			    HN_LRO_LENLIM_MULTIRX_DEF;
 		}
 	}
+#endif
 
 	if (device_info.link_state == 0) {
 		sc->hn_carrier = 1;
