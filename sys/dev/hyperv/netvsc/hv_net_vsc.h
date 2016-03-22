@@ -1157,6 +1157,8 @@ struct hn_rx_ring {
 	int		hn_trust_hcsum;	/* HN_TRUST_HCSUM_ */
 	struct lro_ctrl	hn_lro;
 
+	u_int		hn_lro_gclen;
+
 	u_long		hn_csum_ip;
 	u_long		hn_csum_tcp;
 	u_long		hn_csum_udp;
@@ -1164,6 +1166,7 @@ struct hn_rx_ring {
 	u_long		hn_lro_tried;
 	u_long		hn_small_pkts;
 	u_long		hn_pkts;
+	u_long		hn_lro_gced;
 
 	/* Rarely used stuffs */
 	struct sysctl_oid *hn_rx_sysctl_tree;

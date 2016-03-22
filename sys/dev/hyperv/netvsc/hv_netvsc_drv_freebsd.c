@@ -186,6 +186,10 @@ struct hn_txdesc {
 /* YYY 2*MTU is a bit rough, but should be good enough. */
 #define HN_LRO_LENLIM_MIN(ifp)		(2 * (ifp)->if_mtu)
 
+#define HN_LRO_GC_LEN_DEF		(4 * ETHERMTU)
+#define HN_LRO_GC_LEN_MIN		256
+#define HN_LRO_GC_START_THRESH		1024
+
 #define HN_LRO_ACKCNT_DEF		1
 
 /*
@@ -307,6 +311,7 @@ static void hn_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr);
 static int hn_lro_lenlim_sysctl(SYSCTL_HANDLER_ARGS);
 static int hn_lro_ackcnt_sysctl(SYSCTL_HANDLER_ARGS);
 #endif
+static int hn_lro_gclen_sysctl(SYSCTL_HANDLER_ARGS);
 static int hn_trust_hcsum_sysctl(SYSCTL_HANDLER_ARGS);
 static int hn_tx_chimney_size_sysctl(SYSCTL_HANDLER_ARGS);
 static int hn_rx_stat_ulong_sysctl(SYSCTL_HANDLER_ARGS);
@@ -1234,6 +1239,31 @@ hv_m_append(struct mbuf *m0, int len, c_caddr_t cp)
 	return (remainder == 0);
 }
 
+static bool
+hn_lro_gc(struct hn_rx_ring *rxr, int gc_cnt)
+{
+#if defined(INET) || defined(INET6)
+	struct lro_ctrl *lc = &rxr->hn_lro;
+	struct lro_entry *le, *le_tmp;
+	bool found = false;
+
+	SLIST_FOREACH_SAFE(le, &lc->lro_active, next, le_tmp) {
+		if (le->p_len >= rxr->hn_lro_gclen ||
+		    le->p_len <= HN_LRO_GC_LEN_MIN) {
+			SLIST_REMOVE(&lc->lro_active, le, lro_entry, next);
+			tcp_lro_flush(lc, le);
+			rxr->hn_lro_gced++;
+
+			found = true;
+			if (--gc_cnt == 0)
+				break;
+		}
+	}
+	return found;
+#else
+	return false;
+#endif
+}
 
 /*
  * Called when we receive a data packet from the "wire" on the
@@ -1395,10 +1425,18 @@ skip:
 		struct lro_ctrl *lro = &rxr->hn_lro;
 
 		if (lro->lro_cnt) {
+			int error;
+
 			rxr->hn_lro_tried++;
-			if (tcp_lro_rx(lro, m_new, 0) == 0) {
+again:
+			error = tcp_lro_rx(lro, m_new, 0);
+			if (error == 0) {
 				/* DONE! */
 				return 0;
+			} else if (error == TCP_LRO_NO_ENTRIES &&
+			    m_new->m_pkthdr.len >= HN_LRO_GC_START_THRESH) {
+				if (hn_lro_gc(rxr, 1))
+					goto again;
 			}
 		}
 #endif
@@ -1857,6 +1895,25 @@ hn_lro_ackcnt_sysctl(SYSCTL_HANDLER_ARGS)
 #endif
 
 static int
+hn_lro_gclen_sysctl(SYSCTL_HANDLER_ARGS)
+{
+	struct hn_softc *sc = arg1;
+	u_int gclen;
+	int error, i;
+
+	gclen = sc->hn_rx_ring[0].hn_lro_gclen;
+	error = sysctl_handle_int(oidp, &gclen, 0, req);
+	if (error || req->newptr == NULL)
+		return error;
+
+	NV_LOCK(sc);
+	for (i = 0; i < sc->hn_rx_ring_inuse; ++i)
+		sc->hn_rx_ring[i].hn_lro_gclen = gclen;
+	NV_UNLOCK(sc);
+	return 0;
+}
+
+static int
 hn_trust_hcsum_sysctl(SYSCTL_HANDLER_ARGS)
 {
 	struct hn_softc *sc = arg1;
@@ -2153,6 +2210,7 @@ hn_create_rx_data(struct hn_softc *sc, int ring_cnt)
 		rxr->hn_lro.lro_ackcnt_lim = HN_LRO_ACKCNT_DEF;
 #endif
 #endif	/* INET || INET6 */
+		rxr->hn_lro_gclen = HN_LRO_GC_LEN_DEF;
 
 		if (sc->hn_rx_sysctl_tree != NULL) {
 			char name[16];
@@ -2187,6 +2245,10 @@ hn_create_rx_data(struct hn_softc *sc, int ring_cnt)
 	    CTLTYPE_ULONG | CTLFLAG_RW, sc,
 	    __offsetof(struct hn_rx_ring, hn_lro_tried),
 	    hn_rx_stat_ulong_sysctl, "LU", "# of LRO tries");
+	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "lro_gced",
+	    CTLTYPE_ULONG | CTLFLAG_RW, sc,
+	    __offsetof(struct hn_rx_ring, hn_lro_gced),
+	    hn_rx_stat_ulong_sysctl, "LU", "# of LRO entries GCed");
 #if __FreeBSD_version >= 1100099
 	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "lro_length_lim",
 	    CTLTYPE_UINT | CTLFLAG_RW, sc, 0, hn_lro_lenlim_sysctl, "IU",
@@ -2195,6 +2257,10 @@ hn_create_rx_data(struct hn_softc *sc, int ring_cnt)
 	    CTLTYPE_INT | CTLFLAG_RW, sc, 0, hn_lro_ackcnt_sysctl, "I",
 	    "Max # of ACKs to be aggregated by LRO");
 #endif
+	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "lro_gc_length",
+	    CTLTYPE_UINT | CTLFLAG_RW, sc, 0, hn_lro_gclen_sysctl, "IU",
+	    "Min # of data bytes to be aggregated by LRO, "
+	    "before the LRO entry can be GCed");
 	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "trust_hosttcp",
 	    CTLTYPE_INT | CTLFLAG_RW, sc, HN_TRUST_HCSUM_TCP,
 	    hn_trust_hcsum_sysctl, "I",
