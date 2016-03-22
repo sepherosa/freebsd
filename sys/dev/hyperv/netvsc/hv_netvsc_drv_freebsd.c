@@ -1246,7 +1246,6 @@ hn_lro_gc(struct hn_rx_ring *rxr, int gc_cnt)
 	struct lro_ctrl *lc = &rxr->hn_lro;
 	struct lro_entry *le, *le_tmp;
 	bool found = false;
-	int le_cnt = 0;
 
 	rxr->hn_lro_gc_tried++;
 	SLIST_FOREACH_SAFE(le, &lc->lro_active, next, le_tmp) {
@@ -1260,8 +1259,6 @@ hn_lro_gc(struct hn_rx_ring *rxr, int gc_cnt)
 			if (--gc_cnt == 0)
 				break;
 		}
-		if (++le_cnt == 8)
-			break;
 	}
 	return found;
 #else
@@ -1438,7 +1435,8 @@ again:
 				/* DONE! */
 				return 0;
 			} else if (error == TCP_LRO_NO_ENTRIES &&
-			    m_new->m_pkthdr.len >= HN_LRO_GC_START_THRESH) {
+			    m_new->m_pkthdr.len >= HN_LRO_GC_START_THRESH &&
+			    rxr->hn_lro_gclen > 0) {
 				if (hn_lro_gc(rxr, 1))
 					goto again;
 			}
