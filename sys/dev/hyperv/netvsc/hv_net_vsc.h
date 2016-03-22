@@ -1166,6 +1166,7 @@ struct hn_rx_ring {
 	u_long		hn_lro_tried;
 	u_long		hn_small_pkts;
 	u_long		hn_pkts;
+	u_long		hn_lro_gc_tried;
 	u_long		hn_lro_gced;
 
 	/* Rarely used stuffs */

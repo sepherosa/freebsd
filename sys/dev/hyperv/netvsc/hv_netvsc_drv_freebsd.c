@@ -1246,7 +1246,9 @@ hn_lro_gc(struct hn_rx_ring *rxr, int gc_cnt)
 	struct lro_ctrl *lc = &rxr->hn_lro;
 	struct lro_entry *le, *le_tmp;
 	bool found = false;
+	int le_cnt = 0;
 
+	rxr->hn_lro_gc_tried++;
 	SLIST_FOREACH_SAFE(le, &lc->lro_active, next, le_tmp) {
 		if (le->p_len >= rxr->hn_lro_gclen ||
 		    le->p_len <= HN_LRO_GC_LEN_MIN) {
@@ -1258,6 +1260,8 @@ hn_lro_gc(struct hn_rx_ring *rxr, int gc_cnt)
 			if (--gc_cnt == 0)
 				break;
 		}
+		if (++le_cnt == 8)
+			break;
 	}
 	return found;
 #else
@@ -2245,6 +2249,10 @@ hn_create_rx_data(struct hn_softc *sc, int ring_cnt)
 	    CTLTYPE_ULONG | CTLFLAG_RW, sc,
 	    __offsetof(struct hn_rx_ring, hn_lro_tried),
 	    hn_rx_stat_ulong_sysctl, "LU", "# of LRO tries");
+	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "lro_gc_tried",
+	    CTLTYPE_ULONG | CTLFLAG_RW, sc,
+	    __offsetof(struct hn_rx_ring, hn_lro_gc_tried),
+	    hn_rx_stat_ulong_sysctl, "LU", "# of LRO entries GC tries");
 	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "lro_gced",
 	    CTLTYPE_ULONG | CTLFLAG_RW, sc,
 	    __offsetof(struct hn_rx_ring, hn_lro_gced),
