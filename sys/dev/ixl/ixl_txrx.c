@@ -1734,7 +1734,7 @@ next_desc:
 	/*
 	 * Flush any outstanding LRO work
 	 */
-	tcp_lro_rx_done(lro);
+	tcp_lro_flush_all(lro);
 #endif
 
 	IXL_RX_UNLOCK(rxr);

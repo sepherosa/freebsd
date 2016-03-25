@@ -1502,7 +1502,7 @@ oce_rx_flush_lro(struct oce_rq *rq)
 	if (!IF_LRO_ENABLED(sc))
 		return;
 
-	tcp_lro_rx_done(lro);
+	tcp_lro_flush_all(lro);
 	rq->lro_pkts_queued = 0;
 	
 	return;

@@ -1083,7 +1083,7 @@ vxge_rx_compl(vxge_hal_vpath_h vpath_handle, vxge_hal_rxd_h rxdh,
 
 	/* Flush any outstanding LRO work */
 	if (vpath->lro_enable && vpath->lro.lro_cnt)
-		tcp_lro_rx_done(lro);
+		tcp_lro_flush_all(lro);
 
 	return (status);
 }

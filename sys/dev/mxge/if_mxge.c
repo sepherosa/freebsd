@@ -2819,7 +2819,7 @@ mxge_clean_rx_done(struct mxge_slice_state *ss)
 			break;
 	}
 #if defined(INET)  || defined (INET6)
-	tcp_lro_rx_done(&ss->lc);
+	tcp_lro_flush_all(&ss->lc);
 #endif
 }
 

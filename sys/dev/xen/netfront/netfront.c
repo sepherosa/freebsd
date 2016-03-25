@@ -1295,7 +1295,7 @@ xn_rxeof(struct netfront_rxq *rxq)
 		/*
 		 * Flush any outstanding LRO work
 		 */
-		tcp_lro_rx_done(lro);
+		tcp_lro_flush_all(lro);
 #endif
 
 		xn_alloc_rx_buffers(rxq);

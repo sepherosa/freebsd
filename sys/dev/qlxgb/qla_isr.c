@@ -323,7 +323,7 @@ qla_rcv_isr(qla_host_t *ha, uint32_t sds_idx, uint32_t count)
 		}
 	}
 
-	tcp_lro_rx_done(lro);
+	tcp_lro_flush_all(lro);
 
 	if (hw->sds[sds_idx].sdsr_next != comp_idx) {
 		QL_UPDATE_SDS_CONSUMER_INDEX(ha, sds_idx, comp_idx);

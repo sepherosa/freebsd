@@ -67,6 +67,8 @@ static MALLOC_DEFINE(M_LRO, "LRO", "LRO control structures");
 #define	TCP_LRO_INVALID_CSUM	0x0000
 #endif
 
+static void	tcp_lro_rx_done(struct lro_ctrl *lc);
+
 int
 tcp_lro_init(struct lro_ctrl *lc)
 {
@@ -226,7 +228,7 @@ tcp_lro_rx_csum_fixup(struct lro_entry *le, void *l3hdr, struct tcphdr *th,
 }
 #endif
 
-void
+static void
 tcp_lro_rx_done(struct lro_ctrl *lc)
 {
 	struct lro_entry *le;
@@ -378,7 +380,7 @@ tcp_lro_flush_all(struct lro_ctrl *lc)
 	unsigned x;
 
 	/* check if no mbufs to flush */
-	if (__predict_false(lc->lro_mbuf_count == 0))
+	if (lc->lro_mbuf_count == 0)
 		goto done;
 
 	/* sort all mbufs according to stream */

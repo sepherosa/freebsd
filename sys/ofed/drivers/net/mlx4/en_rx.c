@@ -666,7 +666,7 @@ next:
 	/* Flush all pending IP reassembly sessions */
 out:
 #ifdef INET
-	tcp_lro_rx_done(&ring->lro);
+	tcp_lro_flush_all(&ring->lro);
 #endif
 	AVG_PERF_COUNTER(priv->pstats.rx_coal_avg, polled);
 	mcq->cons_index = cons_index;

@@ -396,7 +396,7 @@ wq_ll_pop:
 	/* ensure cq space is freed before enabling more cqes */
 	wmb();
 #ifndef HAVE_TURBO_LRO
-	tcp_lro_rx_done(&rq->lro);
+	tcp_lro_flush_all(&rq->lro);
 #endif
 	return (i);
 }

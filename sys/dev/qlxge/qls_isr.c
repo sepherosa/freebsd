@@ -286,7 +286,7 @@ qls_cq_isr(qla_host_t *ha, uint32_t cq_idx)
                 }
 	}
 
-	tcp_lro_rx_done(lro);
+	tcp_lro_flush_all(lro);
 
 	ha->rx_ring[cq_idx].cq_next = cq_comp_idx;
 

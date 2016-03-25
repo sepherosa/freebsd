@@ -826,7 +826,7 @@ out:
 	rq_idx = cq_idx;
 	rq = &nic->qs->rq[rq_idx];
 	lro = &rq->lro;
-	tcp_lro_rx_done(lro);
+	tcp_lro_flush_all(lro);
 
 	NICVF_CMP_UNLOCK(cq);
 

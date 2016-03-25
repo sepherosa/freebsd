@@ -779,7 +779,7 @@ netvsc_channel_rollup(struct hv_vmbus_channel *chan)
 #if defined(INET) || defined(INET6)
 	struct hn_rx_ring *rxr = chan->hv_chan_rxr;
 
-	tcp_lro_rx_done(&rxr->hn_lro);
+	tcp_lro_flush_all(&rxr->hn_lro);
 #endif
 
 	/*

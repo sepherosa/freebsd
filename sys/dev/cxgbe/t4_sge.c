@@ -1398,7 +1398,7 @@ process_iql:
 	if (iq->flags & IQ_LRO_ENABLED) {
 		struct lro_ctrl *lro = &rxq->lro;
 
-		tcp_lro_rx_done(lro);
+		tcp_lro_flush_all(lro);
 	}
 #endif
 

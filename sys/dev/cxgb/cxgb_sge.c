@@ -2976,7 +2976,7 @@ process_responses(adapter_t *adap, struct sge_qset *qs, int budget)
 
 #if defined(INET6) || defined(INET)
 	/* Flush LRO */
-	tcp_lro_rx_done(lro_ctrl);
+	tcp_lro_flush_all(lro_ctrl);
 #endif
 
 	if (sleeping)

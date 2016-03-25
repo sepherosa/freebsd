@@ -2002,7 +2002,7 @@ next_desc:
 	/*
 	 * Flush any outstanding LRO work
 	 */
-	tcp_lro_rx_done(lro);
+	tcp_lro_flush_all(lro);
 
 	IXGBE_RX_UNLOCK(rxr);
 
