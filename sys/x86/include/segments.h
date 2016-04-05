@@ -213,7 +213,15 @@ union descriptor {
 #define	IDT_IO_INTS	NRSVIDT	/* Base of IDT entries for I/O interrupts. */
 #define	IDT_SYSCALL	0x80	/* System Call Interrupt Vector */
 #define	IDT_DTRACE_RET	0x92	/* DTrace pid provider Interrupt Vector */
-#define	IDT_EVTCHN	0x93	/* Xen HVM Event Channel Interrupt Vector */
+#define	IDT_HYPERVISOR0	0x93	/* Hypervisor Interrupt Vector */
+#define	IDT_HYPERVISOR1	0x94	/* Hypervisor Interrupt Vector */
+#define	IDT_HYPERVISOR2	0x95	/* Hypervisor Interrupt Vector */
+#define	IDT_HYPERVISOR3	0x96	/* Hypervisor Interrupt Vector */
+
+#define	IDT_HV_SET_MIN	IDT_HYPERVISOR0
+#define	IDT_HV_SET_MAX	IDT_HYPERVISOR3
+#define	IDT_EVTCHN	IDT_HYPERVISOR0	/* Xen HVM Event Channel */
+#define	IDT_HYPERV	IDT_HYPERVISOR1	/* Hyper-V */
 
 #if defined(__i386__)
 /*
