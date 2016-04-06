@@ -831,9 +831,6 @@ extern inthand_t
 #ifdef XENHVM
 	IDTVEC(xen_intr_upcall),
 #endif
-#ifdef HYPERV
-	IDTVEC(hv_vmbus_callback),
-#endif
 	IDTVEC(fast_syscall), IDTVEC(fast_syscall32);
 
 #ifdef DDB
@@ -1614,9 +1611,6 @@ hammer_time(u_int64_t modulep, u_int64_t physfree)
 #endif
 #ifdef XENHVM
 	setidt(IDT_EVTCHN, &IDTVEC(xen_intr_upcall), SDT_SYSIGT, SEL_UPL, 0);
-#endif
-#ifdef HYPERV
-	setidt(IDT_HYPERV, &IDTVEC(hv_vmbus_callback), SDT_SYSIGT, SEL_UPL, 0);
 #endif
 
 	r_idt.rd_limit = sizeof(idt0) - 1;

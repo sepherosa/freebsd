@@ -1536,9 +1536,6 @@ extern inthand_t
 #ifdef XENHVM
 	IDTVEC(xen_intr_upcall),
 #endif
-#ifdef HYPERV
-	IDTVEC(hv_vmbus_callback),
-#endif
 	IDTVEC(lcall_syscall), IDTVEC(int0x80_syscall);
 
 #ifdef DDB
@@ -2576,10 +2573,6 @@ init386(first)
 #endif
 #ifdef XENHVM
 	setidt(IDT_EVTCHN, &IDTVEC(xen_intr_upcall), SDT_SYS386IGT, SEL_UPL,
-	    GSEL(GCODE_SEL, SEL_KPL));
-#endif
-#ifdef HYPERV
-	setidt(IDT_HYPERV, &IDTVEC(hv_vmbus_callback), SDT_SYS386IGT, SEL_UPL,
 	    GSEL(GCODE_SEL, SEL_KPL));
 #endif
 
