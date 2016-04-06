@@ -92,7 +92,7 @@ CTASSERT(IPI_STOP < APIC_SPURIOUS_INT);
 #define	IRQ_TIMER	(NUM_IO_INTS + 1)
 #define	IRQ_SYSCALL	(NUM_IO_INTS + 2)
 #define	IRQ_DTRACE_RET	(NUM_IO_INTS + 3)
-#define	IRQ_HYPERVISOR	(NUM_IO_INTS + 4)
+#define	IRQ_EVTCHN	(NUM_IO_INTS + 4)
 
 /*
  * Support for local APICs.  Local APICs manage interrupts on each
@@ -522,10 +522,10 @@ native_lapic_create(u_int apic_id, int boot_cpu)
 	lapics[apic_id].la_ioint_irqs[IDT_DTRACE_RET - APIC_IO_INTS] =
 	    IRQ_DTRACE_RET;
 #endif
-	for (i = IDT_HV_SET_MIN; i <= IDT_HV_SET_MAX; ++i) {
-		lapics[apic_id].la_ioint_irqs[i - APIC_IO_INTS] =
-		    IRQ_HYPERVISOR;
-	}
+#ifdef XENHVM
+	lapics[apic_id].la_ioint_irqs[IDT_EVTCHN - APIC_IO_INTS] = IRQ_EVTCHN;
+#endif
+
 
 #ifdef SMP
 	cpu_add(apic_id, boot_cpu);
@@ -1381,8 +1381,10 @@ DB_SHOW_COMMAND(apic, db_show_apic)
 			if (irq == IRQ_DTRACE_RET)
 				continue;
 #endif
-			if (irq == IRQ_HYPERVISOR)
+#ifdef XENHVM
+			if (irq == IRQ_EVTCHN)
 				continue;
+#endif
 			db_printf("vec 0x%2x -> ", i + APIC_IO_INTS);
 			if (irq == IRQ_TIMER)
 				db_printf("lapic timer\n");
