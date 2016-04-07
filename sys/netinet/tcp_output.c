@@ -1546,8 +1546,20 @@ timer:
 			return (error);
 		case ENOBUFS:
 	                if (!tcp_timer_active(tp, TT_REXMT) &&
-			    !tcp_timer_active(tp, TT_PERSIST))
+			    !tcp_timer_active(tp, TT_PERSIST)) {
+				int rxtshift;
+
+				/*
+				 * Make sure that we don't drop a receiving-only
+				 * connection prematurely.
+				 */
+				while ((rxtshift = tp->t_rxtshift) > 0) {
+					if (atomic_cmpset_int(&tp->t_rxtshift,
+					    rxtshift, rxtshift - 1))
+						break;
+				}
 	                        tcp_timer_activate(tp, TT_REXMT, tp->t_rxtcur);
+			}
 			tp->snd_cwnd = tp->t_maxseg;
 			return (0);
 		case EMSGSIZE:
