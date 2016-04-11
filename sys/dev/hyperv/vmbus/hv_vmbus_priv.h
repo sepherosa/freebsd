@@ -482,6 +482,17 @@ typedef enum {
 #define	HV_FEATURE_MSR_HYPERCALL	(1 << 5)
 #define	HV_FEATURE_MSR_GUEST_IDLE	(1 << 10)
 
+#define HV_PM_FEATURE_CSTATE_MASK	0x000f
+#define HV_PM_FEATURE_C3_HPET		0x0010	/* C3 requires HPET */
+#define HV_PM_FEATURE_CSTATE(f)		((f) & HV_PM_FEATURE_CSTATE_MASK)
+
+#define HV_FEATURE3_MWAIT		0x0001	/* MWAIT */
+#define HV_FEATURE3_XMM_HYPERCALL	0x0010	/* hypercall input through XMM regs */
+#define HV_FEATURE3_GUEST_IDLE		0x0020	/* guest idle support */
+#define HV_FEATURE3_NUMA		0x0080	/* NUMA distance query support */
+#define HV_FEATURE3_TIME_FREQ		0x0100	/* timer frequency query (TSC, LAPIC) */
+#define HV_FEATURE3_MSR_CRASH		0x0400	/* MSRs for guest crash */
+
 /*
  * Define the format of the SIMP register
  */

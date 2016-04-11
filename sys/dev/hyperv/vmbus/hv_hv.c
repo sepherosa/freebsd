@@ -54,6 +54,9 @@ static u_int hv_get_timecount(struct timecounter *tc);
 u_int	hyperv_features;
 u_int	hyperv_recommends;
 
+static u_int	hyperv_pm_features;
+static u_int	hyperv_features3;
+
 /**
  * Globals
  */
@@ -426,6 +429,8 @@ hyperv_identify(void)
 		return (false);
 	}
 	hyperv_features = regs[0];
+	hyperv_pm_features = regs[2];
+	hyperv_features3 = regs[3];
 
 	op = HV_CPU_ID_FUNCTION_MS_HV_VERSION;
 	do_cpuid(op, regs);
@@ -447,6 +452,27 @@ hyperv_identify(void)
 	    "\013IDLE"
 	    "\014TMFREQ"
 	    "\015DEBUG");
+	printf("  PM Features=max C%u0x%b\n",
+	    HV_PM_FEATURE_CSTATE(hyperv_pm_features),
+	    (hyperv_pm_features & ~HV_PM_FEATURE_CSTATE_MASK),
+	    "\020"
+	    "\005C3HPET");	/* HPET is required for C3 state */
+	printf("  Features3=0x%b\n", hyperv_features3,
+	    "\020"
+	    "\001MWAIT"		/* MWAIT */
+	    "\002DEBUG"		/* guest debug support */
+	    "\003PERFMON"	/* performance monitor */
+	    "\004PCPUDPE"	/* physical CPU dynamic partition event */
+	    "\005XMMHC"		/* hypercall input through XMM regs */
+	    "\006IDLE"		/* guest idle support */
+	    "\007SLEEP"		/* hypervisor sleep support */
+	    "\010NUMA"		/* NUMA distance query support */
+	    "\011TMFREQ"	/* timer frequency query (TSC, LAPIC) */
+	    "\012SYNCMC"	/* inject synthetic machine checks */
+	    "\013CRASH"		/* MSRs for guest crash */
+	    "\014DEBUGMSR"	/* MSRs for guest debug */
+	    "\015NPIEP"		/* NPIEP */
+	    "\016HVDIS");	/* disabling hypervisor */
 
 	op = HV_CPU_ID_FUNCTION_MS_HV_ENLIGHTENMENT_INFORMATION;
 	do_cpuid(op, regs);
