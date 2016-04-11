@@ -409,46 +409,44 @@ hyperv_identify(void)
 
 	op = HV_CPU_ID_FUNCTION_HV_VENDOR_AND_MAX_FUNCTION;
 	do_cpuid(op, regs);
-
 	maxLeaf = regs[0];
-	op = HV_CPU_ID_FUNCTION_HV_INTERFACE;
-	do_cpuid(op, regs);
-	if (regs[0] != 0x31237648 /* HV#1 */ ||
-	    maxLeaf < HV_CPU_ID_FUNCTION_MS_HV_IMPLEMENTATION_LIMITS)
+	if (maxLeaf < HV_CPU_ID_FUNCTION_MS_HV_IMPLEMENTATION_LIMITS)
 		return (false);
 
-	if (maxLeaf >= HV_CPU_ID_FUNCTION_MS_HV_VERSION) {
-		op = HV_CPU_ID_FUNCTION_MS_HV_VERSION;
-		do_cpuid(op, regs);
-		printf("Hyper-V Version: %d.%d.%d [SP%d]\n",
-		    regs[1] >> 16, regs[1] & 0xffff, regs[0], regs[2]);
-	}
+	op = HV_CPU_ID_FUNCTION_HV_INTERFACE;
+	do_cpuid(op, regs);
+	if (regs[0] != 0x31237648 /* HV#1 */)
+		return (false);
 
-	if (maxLeaf >= HV_CPU_ID_FUNCTION_MS_HV_FEATURES) {
-		op = HV_CPU_ID_FUNCTION_MS_HV_FEATURES;
-		do_cpuid(op, regs);
-		hyperv_features = regs[0];
-		printf("Hyper-V Features: %08X %08X %08X %08X\n",
-		    regs[0], regs[1], regs[2], regs[3]);
+	op = HV_CPU_ID_FUNCTION_MS_HV_FEATURES;
+	do_cpuid(op, regs);
+	if ((regs[0] & HV_FEATURE_MSR_HYPERCALL) == 0) {
+		/*
+		 * Hyper-V w/o Hypercall is impossible; someone
+		 * is faking Hyper-V.
+		 */
+		return (false);
 	}
+	hyperv_features = regs[0];
+	printf("Hyper-V Features: %08X %08X %08X %08X\n",
+	    regs[0], regs[1], regs[2], regs[3]);
 
-	if (maxLeaf >= HV_CPU_ID_FUNCTION_MS_HV_ENLIGHTENMENT_INFORMATION) {
-		op = HV_CPU_ID_FUNCTION_MS_HV_ENLIGHTENMENT_INFORMATION;
-		do_cpuid(op, regs);
-		hyperv_recommends = regs[0];
-		if (bootverbose) {
-			printf("Hyper-V Recommends: %08X %08X\n",
-			    regs[0], regs[1]);
-		}
-	}
+	op = HV_CPU_ID_FUNCTION_MS_HV_VERSION;
+	do_cpuid(op, regs);
+	printf("Hyper-V Version: %d.%d.%d [SP%d]\n",
+	    regs[1] >> 16, regs[1] & 0xffff, regs[0], regs[2]);
 
-	if (maxLeaf >= HV_CPU_ID_FUNCTION_MS_HV_IMPLEMENTATION_LIMITS) {
-		op = HV_CPU_ID_FUNCTION_MS_HV_IMPLEMENTATION_LIMITS;
-		do_cpuid(op, regs);
-		if (bootverbose) {
-			printf("Hyper-V Limits: Vcpu:%d Lcpu:%d Int:%d\n",
-			    regs[0], regs[1], regs[2]);
-		}
+	op = HV_CPU_ID_FUNCTION_MS_HV_ENLIGHTENMENT_INFORMATION;
+	do_cpuid(op, regs);
+	hyperv_recommends = regs[0];
+	if (bootverbose)
+		printf("Hyper-V Recommends: %08X %08X\n", regs[0], regs[1]);
+
+	op = HV_CPU_ID_FUNCTION_MS_HV_IMPLEMENTATION_LIMITS;
+	do_cpuid(op, regs);
+	if (bootverbose) {
+		printf("Hyper-V Limits: Vcpu:%d Lcpu:%d Int:%d\n",
+		    regs[0], regs[1], regs[2]);
 	}
 
 	if (maxLeaf >= HV_CPU_ID_FUNCTION_MS_HV_HARDWARE_FEATURE) {
