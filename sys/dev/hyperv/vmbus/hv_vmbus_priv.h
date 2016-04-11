@@ -475,7 +475,7 @@ typedef enum {
 	HV_CPU_ID_FUNCTION_MS_HV_HARDWARE_FEATURE		= 0x40000006
 } hv_vmbus_cpuid_function;
 
-#define	HV_FEATURE_MSR_REF_COUNT	(1 << 1)
+#define	HV_FEATURE_MSR_TIME_REFCNT	(1 << 1)
 #define	HV_FEATURE_MSR_SYNCIC		(1 << 2)
 #define	HV_FEATURE_MSR_STIMER		(1 << 3)
 #define	HV_FEATURE_MSR_APIC		(1 << 4)

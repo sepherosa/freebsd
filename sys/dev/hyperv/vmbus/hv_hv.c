@@ -428,24 +428,38 @@ hyperv_identify(void)
 		return (false);
 	}
 	hyperv_features = regs[0];
-	printf("Hyper-V Features: %08X %08X %08X %08X\n",
-	    regs[0], regs[1], regs[2], regs[3]);
 
 	op = HV_CPU_ID_FUNCTION_MS_HV_VERSION;
 	do_cpuid(op, regs);
 	printf("Hyper-V Version: %d.%d.%d [SP%d]\n",
 	    regs[1] >> 16, regs[1] & 0xffff, regs[0], regs[2]);
 
+	printf("  Features: 0x%b\n", hyperv_features,
+	    "\020"
+	    "\001VPRUNTIME"
+	    "\002TMEFCNT"
+	    "\003SYNCIC"
+	    "\004SYNCTM"
+	    "\005APIC"
+	    "\006HYERCALL"
+	    "\007VPINDEX"
+	    "\010RESET"
+	    "\011STATS"
+	    "\012REFTSC"
+	    "\013IDLE"
+	    "\014TMFREQ"
+	    "\015DEBUG");
+
 	op = HV_CPU_ID_FUNCTION_MS_HV_ENLIGHTENMENT_INFORMATION;
 	do_cpuid(op, regs);
 	hyperv_recommends = regs[0];
 	if (bootverbose)
-		printf("Hyper-V Recommends: %08X %08X\n", regs[0], regs[1]);
+		printf("  Recommends: %08x %08x\n", regs[0], regs[1]);
 
 	op = HV_CPU_ID_FUNCTION_MS_HV_IMPLEMENTATION_LIMITS;
 	do_cpuid(op, regs);
 	if (bootverbose) {
-		printf("Hyper-V Limits: Vcpu:%d Lcpu:%d Int:%d\n",
+		printf("  Limits: Vcpu:%d Lcpu:%d Int:%d\n",
 		    regs[0], regs[1], regs[2]);
 	}
 
@@ -453,7 +467,7 @@ hyperv_identify(void)
 		op = HV_CPU_ID_FUNCTION_MS_HV_HARDWARE_FEATURE;
 		do_cpuid(op, regs);
 		if (bootverbose) {
-			printf("Hyper-V HW Features: %08x AMD: %08x\n",
+			printf("  HW Features: %08x AMD: %08x\n",
 			    regs[0], regs[3]);
 		}
 	}
