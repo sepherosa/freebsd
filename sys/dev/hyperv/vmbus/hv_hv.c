@@ -437,7 +437,7 @@ hyperv_identify(void)
 	printf("  Features: 0x%b\n", hyperv_features,
 	    "\020"
 	    "\001VPRUNTIME"
-	    "\002TMEFCNT"
+	    "\002TMREFCNT"
 	    "\003SYNCIC"
 	    "\004SYNCTM"
 	    "\005APIC"
