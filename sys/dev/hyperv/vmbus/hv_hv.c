@@ -437,22 +437,22 @@ hyperv_identify(void)
 	printf("Hyper-V Version: %d.%d.%d [SP%d]\n",
 	    regs[1] >> 16, regs[1] & 0xffff, regs[0], regs[2]);
 
-	printf("  Features: 0x%b\n", hyperv_features,
+	printf("  Features=0x%b\n", hyperv_features,
 	    "\020"
-	    "\001VPRUNTIME"
-	    "\002TMREFCNT"
-	    "\003SYNCIC"
-	    "\004SYNCTM"
-	    "\005APIC"
-	    "\006HYERCALL"
-	    "\007VPINDEX"
-	    "\010RESET"
-	    "\011STATS"
-	    "\012REFTSC"
-	    "\013IDLE"
-	    "\014TMFREQ"
-	    "\015DEBUG");
-	printf("  PM Features=max C%u0x%b\n",
+	    "\001VPRUNTIME"	/* MSR_VP_RUNTIME */
+	    "\002TMREFCNT"	/* MSR_TIME_REF_COUNT */
+	    "\003SYNIC"		/* MSRs for SynIC */
+	    "\004SYNTM"		/* MSRs for SynTimer */
+	    "\005APIC"		/* MSR_{EOI,ICR,TPR} */
+	    "\006HYERCALL"	/* MSR_{GUEST_OS_ID,HYPERCALL} */
+	    "\007VPINDEX"	/* MSR_VP_INDEX */
+	    "\010RESET"		/* MSR_RESET */
+	    "\011STATS"		/* MSR_STATS_ */
+	    "\012REFTSC"	/* MSR_REFERENCE_TSC */
+	    "\013IDLE"		/* MSR_GUEST_IDLE */
+	    "\014TMFREQ"	/* MSR_{TSC,APIC}_FREQUENCY */
+	    "\015DEBUG");	/* MSR_SYNTH_DEBUG_ */
+	printf("  PM Features=max C%u, 0x%b\n",
 	    HV_PM_FEATURE_CSTATE(hyperv_pm_features),
 	    (hyperv_pm_features & ~HV_PM_FEATURE_CSTATE_MASK),
 	    "\020"
