@@ -2093,8 +2093,12 @@ storvsc_io_done(struct hv_storvsc_request *reqp)
 		reqp->softc->hs_frozen = 0;
 	}
 	storvsc_free_request(sc, reqp);
-	xpt_done(ccb);
 	mtx_unlock(&sc->hs_lock);
+
+	if ((ccb->ccb_h.func_code & XPT_FC_QUEUED) == 0)
+		xpt_done(ccb);
+	else
+		xpt_done_direct(ccb);
 }
 
 /**
