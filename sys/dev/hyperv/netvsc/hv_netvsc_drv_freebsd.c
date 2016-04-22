@@ -2308,7 +2308,6 @@ hn_create_tx_ring(struct hn_softc *sc, int id)
 		TASK_INIT(&txr->hn_txeof_task, 0, hn_xmit_txeof_taskfunc, txr);
 
 		br_depth = hn_get_txswq_depth(txr);
-		device_printf(sc->hn_dev, "bufring depth %d\n", br_depth);
 		txr->hn_mbuf_br = buf_ring_alloc(br_depth, M_NETVSC,
 		    M_WAITOK, &txr->hn_tx_lock);
 	}
