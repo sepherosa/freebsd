@@ -214,7 +214,8 @@ struct hn_txdesc {
 
 int hv_promisc_mode = 0;    /* normal mode by default */
 
-SYSCTL_NODE(_hw, OID_AUTO, hn, CTLFLAG_RD, NULL, "Hyper-V network interface");
+SYSCTL_NODE(_hw, OID_AUTO, hn, CTLFLAG_RD | CTLFLAG_MPSAFE, NULL,
+    "Hyper-V network interface");
 
 /* Trust tcp segements verification on host side. */
 static int hn_trust_hosttcp = 1;
@@ -2170,7 +2171,7 @@ hn_create_rx_data(struct hn_softc *sc, int ring_cnt)
 
 	/* Create dev.hn.UNIT.rx sysctl tree */
 	sc->hn_rx_sysctl_tree = SYSCTL_ADD_NODE(ctx, child, OID_AUTO, "rx",
-	    CTLFLAG_RD, 0, "");
+	    CTLFLAG_RD | CTLFLAG_MPSAFE, 0, "");
 
 	for (i = 0; i < sc->hn_rx_ring_cnt; ++i) {
 		struct hn_rx_ring *rxr = &sc->hn_rx_ring[i];
@@ -2210,7 +2211,7 @@ hn_create_rx_data(struct hn_softc *sc, int ring_cnt)
 			snprintf(name, sizeof(name), "%d", i);
 			rxr->hn_rx_sysctl_tree = SYSCTL_ADD_NODE(ctx,
 			    SYSCTL_CHILDREN(sc->hn_rx_sysctl_tree),
-			    OID_AUTO, name, CTLFLAG_RD, 0, "");
+			    OID_AUTO, name, CTLFLAG_RD | CTLFLAG_MPSAFE, 0, "");
 
 			if (rxr->hn_rx_sysctl_tree != NULL) {
 				SYSCTL_ADD_ULONG(ctx,
@@ -2469,7 +2470,7 @@ hn_create_tx_ring(struct hn_softc *sc, int id)
 
 		snprintf(name, sizeof(name), "%d", id);
 		txr->hn_tx_sysctl_tree = SYSCTL_ADD_NODE(ctx, child, OID_AUTO,
-		    name, CTLFLAG_RD, 0, "");
+		    name, CTLFLAG_RD | CTLFLAG_MPSAFE, 0, "");
 
 		if (txr->hn_tx_sysctl_tree != NULL) {
 			child = SYSCTL_CHILDREN(txr->hn_tx_sysctl_tree);
@@ -2564,7 +2565,7 @@ hn_create_tx_data(struct hn_softc *sc, int ring_cnt)
 
 	/* Create dev.hn.UNIT.tx sysctl tree */
 	sc->hn_tx_sysctl_tree = SYSCTL_ADD_NODE(ctx, child, OID_AUTO, "tx",
-	    CTLFLAG_RD, 0, "");
+	    CTLFLAG_RD | CTLFLAG_MPSAFE, 0, "");
 
 	for (i = 0; i < sc->hn_tx_ring_cnt; ++i) {
 		int error;
