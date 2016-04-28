@@ -69,6 +69,39 @@ static MALLOC_DEFINE(M_LRO, "LRO", "LRO control structures");
 
 static void	tcp_lro_rx_done(struct lro_ctrl *lc);
 
+static __inline void
+tcp_lro_active_insert(struct lro_ctrl *lc, struct lro_entry *le)
+{
+
+	LIST_INSERT_HEAD(&lc->lro_active, le, next);
+}
+
+static __inline void
+tcp_lro_active_remove(struct lro_entry *le)
+{
+
+	LIST_REMOVE(le, next);
+}
+
+static __inline struct lro_entry *
+tcp_lro_entry_get(struct lro_ctrl *lc)
+{
+	struct lro_entry *le;
+
+	le = LIST_FIRST(&lc->lro_free);
+	if (le == NULL)
+		return (NULL);
+	LIST_REMOVE(le, next);
+	return (le);
+}
+
+static __inline void
+tcp_lro_entry_put(struct lro_ctrl *lc, struct lro_entry *le)
+{
+
+	LIST_INSERT_HEAD(&lc->lro_free, le, next);
+}
+
 int
 tcp_lro_init(struct lro_ctrl *lc)
 {
@@ -129,7 +162,7 @@ tcp_lro_free(struct lro_ctrl *lc)
 
 	/* free active mbufs, if any */
 	while ((le = LIST_FIRST(&lc->lro_active)) != NULL) {
-		LIST_REMOVE(le, next);
+		tcp_lro_active_remove(le);
 		m_freem(le->m_head);
 	}
 
@@ -234,7 +267,7 @@ tcp_lro_rx_done(struct lro_ctrl *lc)
 	struct lro_entry *le;
 
 	while ((le = LIST_FIRST(&lc->lro_active)) != NULL) {
-		LIST_REMOVE(le, next);
+		tcp_lro_active_remove(le);
 		tcp_lro_flush(lc, le);
 	}
 }
@@ -252,7 +285,7 @@ tcp_lro_flush_inactive(struct lro_ctrl *lc, const struct timeval *timeout)
 	timevalsub(&tv, timeout);
 	LIST_FOREACH_SAFE(le, &lc->lro_active, next, le_tmp) {
 		if (timevalcmp(&tv, &le->mtime, >=)) {
-			LIST_REMOVE(le, next);
+			tcp_lro_active_remove(le);
 			tcp_lro_flush(lc, le);
 		}
 	}
@@ -348,7 +381,7 @@ tcp_lro_flush(struct lro_ctrl *lc, struct lro_entry *le)
 	lc->lro_queued += le->append_cnt + 1;
 	lc->lro_flushed++;
 	bzero(le, sizeof(*le));
-	LIST_INSERT_HEAD(&lc->lro_free, le, next);
+	tcp_lro_entry_put(lc, le);
 }
 
 static int
@@ -620,7 +653,7 @@ tcp_lro_rx(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum)
 
 		/* Flush now if appending will result in overflow. */
 		if (le->p_len > (lc->lro_length_lim - tcp_data_len)) {
-			LIST_REMOVE(le, next);
+			tcp_lro_active_remove(le);
 			tcp_lro_flush(lc, le);
 			break;
 		}
@@ -629,7 +662,7 @@ tcp_lro_rx(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum)
 		if (__predict_false(seq != le->next_seq ||
 		    (tcp_data_len == 0 && le->ack_seq == th->th_ack))) {
 			/* Out of order packet or duplicate ACK. */
-			LIST_REMOVE(le, next);
+			tcp_lro_active_remove(le);
 			tcp_lro_flush(lc, le);
 			return (TCP_LRO_CANNOT);
 		}
@@ -662,7 +695,7 @@ tcp_lro_rx(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum)
 			 * be further delayed.
 			 */
 			if (le->append_cnt >= lc->lro_ackcnt_lim) {
-				LIST_REMOVE(le, next);
+				tcp_lro_active_remove(le);
 				tcp_lro_flush(lc, le);
 			}
 			return (0);
@@ -686,7 +719,7 @@ tcp_lro_rx(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum)
 		 * overflow, pro-actively flush now.
 		 */
 		if (le->p_len > (lc->lro_length_lim - lc->ifp->if_mtu)) {
-			LIST_REMOVE(le, next);
+			tcp_lro_active_remove(le);
 			tcp_lro_flush(lc, le);
 		} else
 			getmicrotime(&le->mtime);
@@ -695,13 +728,12 @@ tcp_lro_rx(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum)
 	}
 
 	/* Try to find an empty slot. */
-	if (LIST_EMPTY(&lc->lro_free))
+	le = tcp_lro_entry_get(lc);
+	if (le == NULL)
 		return (TCP_LRO_NO_ENTRIES);
 
 	/* Start a new segment chain. */
-	le = LIST_FIRST(&lc->lro_free);
-	LIST_REMOVE(le, next);
-	LIST_INSERT_HEAD(&lc->lro_active, le, next);
+	tcp_lro_active_insert(lc, le);
 	getmicrotime(&le->mtime);
 
 	/* Start filling in details. */
