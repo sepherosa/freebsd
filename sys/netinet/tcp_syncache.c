@@ -1692,6 +1692,11 @@ syncache_respond(struct syncache *sc, struct syncache_head *sch, int locked,
 
 	M_SETFIB(m, sc->sc_inc.inc_fibnum);
 	m->m_pkthdr.csum_data = offsetof(struct tcphdr, th_sum);
+	/*
+	 * If we have peer's SYN and it has a flowid, then let's assign it to
+	 * our SYN|ACK.  ip6_output() and ip_output() will not assign flowid
+	 * to SYN|ACK due to lack of inp here.
+	 */
 	if (m0 != NULL && M_HASHTYPE_GET(m0) != M_HASHTYPE_NONE) {
 		m->m_pkthdr.flowid = m0->m_pkthdr.flowid;
 		M_HASHTYPE_SET(m, M_HASHTYPE_GET(m0));
