@@ -1505,6 +1505,10 @@ tfo_done:
 	return (rv);
 }
 
+/*
+ * Send SYN|ACK to the peer.  Either in response to the peer's SYN,
+ * i.e. m0 != NULL, or upon 3WHS ACK timeout, i.e. m0 == NULL.
+ */
 static int
 syncache_respond(struct syncache *sc, struct syncache_head *sch, int locked,
     const struct mbuf *m0)
