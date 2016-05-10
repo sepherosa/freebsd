@@ -1545,10 +1545,9 @@ timer:
 			tp->t_softerror = error;
 			return (error);
 		case ENOBUFS:
-			if ((len > 0 || (flags & (TH_SYN | TH_FIN))) &&
-			    !tcp_timer_active(tp, TT_REXMT) &&
+	                if (!tcp_timer_active(tp, TT_REXMT) &&
 			    !tcp_timer_active(tp, TT_PERSIST))
-				panic("neither rexmt nor persist timer is set");
+	                        tcp_timer_activate(tp, TT_REXMT, tp->t_rxtcur);
 			tp->snd_cwnd = tp->t_maxseg;
 			return (0);
 		case EMSGSIZE:
