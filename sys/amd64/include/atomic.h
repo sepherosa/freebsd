@@ -573,6 +573,7 @@ u_long	atomic_swap_long(volatile u_long *p, u_long v);
 #define	atomic_readandclear_32	atomic_readandclear_int
 #define	atomic_fetchadd_32	atomic_fetchadd_int
 #define	atomic_testandset_32	atomic_testandset_int
+#define	atomic_testandclear_32	atomic_testandclear_int
 
 /* Operations on 64-bit quad words. */
 #define	atomic_set_64		atomic_set_long
@@ -596,6 +597,7 @@ u_long	atomic_swap_long(volatile u_long *p, u_long v);
 #define	atomic_readandclear_64	atomic_readandclear_long
 #define	atomic_fetchadd_64	atomic_fetchadd_long
 #define	atomic_testandset_64	atomic_testandset_long
+#define	atomic_testandclear_64	atomic_testandclear_long
 
 /* Operations on pointers. */
 #define	atomic_set_ptr		atomic_set_long

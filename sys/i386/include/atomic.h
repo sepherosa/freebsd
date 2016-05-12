@@ -753,6 +753,7 @@ u_long	atomic_swap_long(volatile u_long *p, u_long v);
 #define	atomic_readandclear_32	atomic_readandclear_int
 #define	atomic_fetchadd_32	atomic_fetchadd_int
 #define	atomic_testandset_32	atomic_testandset_int
+#define	atomic_testandclear_32	atomic_testandclear_int
 
 /* Operations on pointers. */
 #define	atomic_set_ptr(p, v) \
