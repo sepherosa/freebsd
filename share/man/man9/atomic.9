@@ -65,9 +65,9 @@
 .Ft <type>
 .Fn atomic_swap_<type> "volatile <type> *p" "<type> v"
 .Ft int
-.Fn atomic_testandset_<type> "volatile <type> *p" "u_int v"
-.Ft int
 .Fn atomic_testandclear_<type> "volatile <type> *p" "u_int v"
+.Ft int
+.Fn atomic_testandset_<type> "volatile <type> *p" "u_int v"
 .Sh DESCRIPTION
 Each of the atomic operations is guaranteed to be atomic across multiple
 threads and in the presence of interrupts.
@@ -311,6 +311,15 @@ and
 .Dq Li 16
 and do not have any variants with memory barriers at this time.
 .Bl -hang
+.It Fn atomic_testandclear p v
+.Bd -literal -compact
+bit = 1 << (v % (sizeof(*p) * NBBY));
+tmp = (*p & bit) != 0;
+*p &= ~bit;
+return (tmp);
+.Ed
+.El
+.Bl -hang
 .It Fn atomic_testandset p v
 .Bd -literal -compact
 bit = 1 << (v % (sizeof(*p) * NBBY));
@@ -322,24 +331,7 @@ return (tmp);
 .Pp
 The
 .Fn atomic_testandset
-functions are only implemented for the types
-.Dq Li int ,
-.Dq Li long
 and
-.Dq Li 32
-and do not have any variants with memory barriers at this time.
-.Pp
-.Bl -hang
-.It Fn atomic_testandclear p v
-.Bd -literal -compact
-bit = 1 << (v % (sizeof(*p) * NBBY));
-tmp = (*p & bit) != 0;
-*p &= ~bit;
-return (tmp);
-.Ed
-.El
-.Pp
-The
 .Fn atomic_testandclear
 functions are only implemented for the types
 .Dq Li int ,
