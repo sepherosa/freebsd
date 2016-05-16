@@ -345,7 +345,8 @@ hv_vmbus_on_events(int cpu)
 			struct hv_vmbus_channel *channel;
 			uint32_t rel_id;
 
-			flags &= ~(1UL << (bit - 1));
+			--bit;	/* NOTE: ffsl is 1-based */
+			flags &= ~(1UL << bit);
 
 			rel_id = rel_id_base + bit;
 			channel = hv_vmbus_g_connection.channels[rel_id];
