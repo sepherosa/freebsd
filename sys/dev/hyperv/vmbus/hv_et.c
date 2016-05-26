@@ -61,37 +61,55 @@ __FBSDID("$FreeBSD$");
 
 static struct eventtimer *et;
 
-static inline uint64_t
+static __inline uint64_t
 sbintime2tick(sbintime_t time)
 {
 	struct timespec val;
 
 	val = sbttots(time);
-	return val.tv_sec * HV_TIMER_FREQUENCY + val.tv_nsec / 100;
+	return (val.tv_sec * HV_TIMER_FREQUENCY) + (val.tv_nsec / 100);
 }
 
 static int
 hv_et_start(struct eventtimer *et, sbintime_t firsttime, sbintime_t periodtime)
 {
-	uint64_t current, config;
-
-	config = MSR_HV_STIMER_CFG_AUTOEN | MSR_HV_STIMER0_CFG_SINT;
+	uint64_t current;
 
 	current = rdmsr(MSR_HV_TIME_REF_COUNT);
 	current += sbintime2tick(firsttime);
-
-	wrmsr(MSR_HV_STIMER0_CONFIG, config);
 	wrmsr(MSR_HV_STIMER0_COUNT, current);
 
 	return (0);
 }
 
+static void
+vmbus_et_config(struct eventtimer *et __unused, uint64_t config)
+{
+	/* Stop counting, and this also implies disabling STIMER0 */
+	wrmsr(MSR_HV_STIMER0_COUNT, 0);
+
+	/*
+	 * Make sure that STIMER0 is really disabled before writing
+	 * to STIMER0_CONFIG.
+	 *
+	 * "Writing to the configuration register of a timer that
+	 *  is already enabled may result in undefined behaviour."
+	 */
+	for (;;) {
+		uint64_t val;
+
+		val = rdmsr(MSR_HV_STIMER0_CONFIG);
+		if ((val & MSR_HV_STIMER_CFG_ENABLE) == 0)
+			break;
+		cpu_spinwait();
+	}
+	wrmsr(MSR_HV_STIMER0_CONFIG, config);
+}
+
 static int
 hv_et_stop(struct eventtimer *et)
 {
-	wrmsr(MSR_HV_STIMER0_CONFIG, 0);
-	wrmsr(MSR_HV_STIMER0_COUNT, 0);
-
+	vmbus_et_config(et, 0);
 	return (0);
 }
 
@@ -130,6 +148,14 @@ hv_et_probe(device_t dev)
 	return (BUS_PROBE_NOWILDCARD);
 }
 
+static void
+vmbus_et_setup(void *xet)
+{
+	struct eventtimer *et = xet;
+
+	vmbus_et_config(et, MSR_HV_STIMER_CFG_AUTOEN | MSR_HV_STIMER0_CFG_SINT);
+}
+
 static int
 hv_et_attach(device_t dev)
 {
@@ -145,6 +171,14 @@ hv_et_attach(device_t dev)
 	et->et_start = hv_et_start;
 	et->et_stop = hv_et_stop;
 	et->et_priv = dev;
+
+	/*
+	 * Delay a bit to make sure that MSR_HV_TIME_REF_COUNT will
+	 * not return 0, since writing 0 to STIMER0_COUNT will disable
+	 * STIMER0.
+	 */
+	DELAY(100);
+	smp_rendezvous(NULL, vmbus_et_setup, NULL, et);
 
 	return (et_register(et));
 }
