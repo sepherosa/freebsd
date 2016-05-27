@@ -59,7 +59,7 @@ __FBSDID("$FreeBSD$");
 					 CPUID_HV_MSR_SYNIC |		\
 					 CPUID_HV_MSR_SYNTIMER)
 
-static struct eventtimer	vmbus_et;
+static struct eventtimer *et;
 
 static __inline uint64_t
 sbintime2tick(sbintime_t time)
@@ -71,20 +71,19 @@ sbintime2tick(sbintime_t time)
 }
 
 static int
-hv_et_start(struct eventtimer *et __unused, sbintime_t first,
-    sbintime_t period __unused)
+hv_et_start(struct eventtimer *et, sbintime_t firsttime, sbintime_t periodtime)
 {
 	uint64_t current;
 
 	current = rdmsr(MSR_HV_TIME_REF_COUNT);
-	current += sbintime2tick(first);
+	current += sbintime2tick(firsttime);
 	wrmsr(MSR_HV_STIMER0_COUNT, current);
 
 	return (0);
 }
 
 static void
-vmbus_et_config(uint64_t config)
+vmbus_et_config(struct eventtimer *et __unused, uint64_t config)
 {
 	/* Stop counting, and this also implies disabling STIMER0 */
 	wrmsr(MSR_HV_STIMER0_COUNT, 0);
@@ -108,9 +107,9 @@ vmbus_et_config(uint64_t config)
 }
 
 static int
-hv_et_stop(struct eventtimer *et __unused)
+hv_et_stop(struct eventtimer *et)
 {
-	vmbus_et_config(0);
+	vmbus_et_config(et, 0);
 	return (0);
 }
 
@@ -120,12 +119,12 @@ vmbus_et_intr(struct trapframe *frame)
 	struct trapframe *oldframe;
 	struct thread *td;
 
-	if (vmbus_et.et_active) {
+	if (et->et_active) {
 		td = curthread;
 		td->td_intr_nesting_level++;
 		oldframe = td->td_intr_frame;
 		td->td_intr_frame = frame;
-		vmbus_et.et_event_cb(&vmbus_et, vmbus_et.et_arg);
+		et->et_event_cb(et, et->et_arg);
 		td->td_intr_frame = oldframe;
 		td->td_intr_nesting_level--;
 	}
@@ -134,8 +133,7 @@ vmbus_et_intr(struct trapframe *frame)
 static void
 hv_et_identify(driver_t *driver, device_t parent)
 {
-	if (device_get_unit(parent) != 0 ||
-	    device_find_child(parent, "hv_et", -1) != NULL ||
+	if (device_find_child(parent, "hv_et", -1) != NULL ||
 	    (hyperv_features & CPUID_HV_ET_MASK) != CPUID_HV_ET_MASK)
 		return;
 
@@ -151,26 +149,28 @@ hv_et_probe(device_t dev)
 }
 
 static void
-vmbus_et_setup(void *arg __unused)
+vmbus_et_setup(void *xet)
 {
-	vmbus_et_config(MSR_HV_STIMER_CFG_AUTOEN | MSR_HV_STIMER0_CFG_SINT);
+	struct eventtimer *et = xet;
+
+	vmbus_et_config(et, MSR_HV_STIMER_CFG_AUTOEN | MSR_HV_STIMER0_CFG_SINT);
 }
 
 static int
 hv_et_attach(device_t dev)
 {
-	/* XXX: allocate independent IDT vector */
+	/* XXX: need allocate SINT and remove global et */
+	et = device_get_softc(dev);
 
-	vmbus_et.et_name = "Hyper-V";
-	vmbus_et.et_flags = ET_FLAGS_ONESHOT | ET_FLAGS_PERCPU;
-	vmbus_et.et_quality = 1000;
-	vmbus_et.et_frequency = HV_TIMER_FREQUENCY;
-	vmbus_et.et_min_period =
-	    HV_MIN_DELTA_TICKS * ((1LL << 32) / HV_TIMER_FREQUENCY);
-	vmbus_et.et_max_period =
-	    HV_MAX_DELTA_TICKS * ((1LL << 32) / HV_TIMER_FREQUENCY);
-	vmbus_et.et_start = hv_et_start;
-	vmbus_et.et_stop = hv_et_stop;
+	et->et_name = "Hyper-V";
+	et->et_flags = ET_FLAGS_ONESHOT | ET_FLAGS_PERCPU;
+	et->et_quality = 1000;
+	et->et_frequency = HV_TIMER_FREQUENCY;
+	et->et_min_period = HV_MIN_DELTA_TICKS * ((1LL << 32) / HV_TIMER_FREQUENCY);
+	et->et_max_period = HV_MAX_DELTA_TICKS * ((1LL << 32) / HV_TIMER_FREQUENCY);
+	et->et_start = hv_et_start;
+	et->et_stop = hv_et_stop;
+	et->et_priv = dev;
 
 	/*
 	 * Delay a bit to make sure that MSR_HV_TIME_REF_COUNT will
@@ -178,15 +178,15 @@ hv_et_attach(device_t dev)
 	 * STIMER0.
 	 */
 	DELAY(100);
-	smp_rendezvous(NULL, vmbus_et_setup, NULL, NULL);
+	smp_rendezvous(NULL, vmbus_et_setup, NULL, et);
 
-	return (et_register(&vmbus_et));
+	return (et_register(et));
 }
 
 static int
 hv_et_detach(device_t dev)
 {
-	return (et_deregister(&vmbus_et));
+	return (et_deregister(et));
 }
 
 static device_method_t hv_et_methods[] = {
@@ -201,7 +201,7 @@ static device_method_t hv_et_methods[] = {
 static driver_t hv_et_driver = {
 	"hv_et",
 	hv_et_methods,
-	0
+	sizeof(struct eventtimer)
 };
 
 static devclass_t hv_et_devclass;
