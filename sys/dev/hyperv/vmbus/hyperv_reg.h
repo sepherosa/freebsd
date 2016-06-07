@@ -130,4 +130,9 @@
 #define CPUID_LEAF_HV_LIMITS		0x40000005
 #define CPUID_LEAF_HV_HWFEATURES	0x40000006
 
+/*
+ * Hypercall input values
+ */
+#define HYPERCALL_POST_MESSAGE		0x005c
+
 #endif	/* !_HYPERV_REG_H_ */
