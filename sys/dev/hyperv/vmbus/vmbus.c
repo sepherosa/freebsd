@@ -81,19 +81,19 @@ vmbus_msg_task(void *xsc, int pending __unused)
 
 	msg = VMBUS_PCPU_GET(sc, message, curcpu) + VMBUS_SINT_MESSAGE;
 	for (;;) {
-		if (msg->msg_type == VMBUS_MSGTYPE_NONE) {
+		if (msg->msg_type == HYPERV_MSGTYPE_NONE) {
 			/* No message */
 			break;
-		} else if (msg->msg_type == VMBUS_MSGTYPE_CHANNEL) {
+		} else if (msg->msg_type == HYPERV_MSGTYPE_CHANNEL) {
 			/* Channel message */
 			vmbus_chan_msgproc(sc,
 			    __DEVOLATILE(const struct vmbus_message *, msg));
 		}
 
-		msg->msg_type = VMBUS_MSGTYPE_NONE;
+		msg->msg_type = HYPERV_MSGTYPE_NONE;
 		/*
 		 * Make sure the write to msg_type (i.e. set to
-		 * VMBUS_MSGTYPE_NONE) happens before we read the
+		 * HYPERV_MSGTYPE_NONE) happens before we read the
 		 * msg_flags and EOMing. Otherwise, the EOMing will
 		 * not deliver any more messages since there is no
 		 * empty slot
@@ -127,14 +127,14 @@ vmbus_handle_intr1(struct vmbus_softc *sc, struct trapframe *frame, int cpu)
 	 * TODO: move this to independent IDT vector.
 	 */
 	msg = msg_base + VMBUS_SINT_TIMER;
-	if (msg->msg_type == VMBUS_MSGTYPE_TIMER_EXPIRED) {
-		msg->msg_type = VMBUS_MSGTYPE_NONE;
+	if (msg->msg_type == HYPERV_MSGTYPE_TIMER_EXPIRED) {
+		msg->msg_type = HYPERV_MSGTYPE_NONE;
 
 		vmbus_et_intr(frame);
 
 		/*
 		 * Make sure the write to msg_type (i.e. set to
-		 * VMBUS_MSGTYPE_NONE) happens before we read the
+		 * HYPERV_MSGTYPE_NONE) happens before we read the
 		 * msg_flags and EOMing. Otherwise, the EOMing will
 		 * not deliver any more messages since there is no
 		 * empty slot
@@ -166,7 +166,7 @@ vmbus_handle_intr1(struct vmbus_softc *sc, struct trapframe *frame, int cpu)
 	 * Check messages.  Mainly management stuffs; ultra low rate.
 	 */
 	msg = msg_base + VMBUS_SINT_MESSAGE;
-	if (__predict_false(msg->msg_type != VMBUS_MSGTYPE_NONE)) {
+	if (__predict_false(msg->msg_type != HYPERV_MSGTYPE_NONE)) {
 		taskqueue_enqueue(VMBUS_PCPU_GET(sc, message_tq, cpu),
 		    VMBUS_PCPU_PTR(sc, message_task, cpu));
 	}

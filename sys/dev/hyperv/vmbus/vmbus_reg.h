@@ -39,7 +39,7 @@
 #define VMBUS_MSG_SIZE			256
 
 struct vmbus_message {
-	uint32_t	msg_type;	/* VMBUS_MSGTYPE_ */
+	uint32_t	msg_type;	/* HYPERV_MSGTYPE_ */
 	uint8_t		msg_dsize;	/* data size */
 	uint8_t		msg_flags;	/* VMBUS_MSGFLAG_ */
 	uint16_t	msg_rsvd;
@@ -47,10 +47,6 @@ struct vmbus_message {
 	uint8_t		msg_data[VMBUS_MSG_DSIZE_MAX];
 } __packed;
 CTASSERT(sizeof(struct vmbus_message) == VMBUS_MSG_SIZE);
-
-#define VMBUS_MSGTYPE_NONE		0
-#define VMBUS_MSGTYPE_CHANNEL		1
-#define VMBUS_MSGTYPE_TIMER_EXPIRED	0x80000010
 
 #define VMBUS_MSGFLAG_PENDING		0x01
 

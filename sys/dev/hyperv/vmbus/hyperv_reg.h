@@ -29,6 +29,8 @@
 #ifndef _HYPERV_REG_H_
 #define _HYPERV_REG_H_
 
+#include <sys/param.h>
+
 /*
  * Hyper-V Synthetic MSRs
  */
@@ -131,8 +133,34 @@
 #define CPUID_LEAF_HV_HWFEATURES	0x40000006
 
 /*
+ * Hyper-V message types
+ */
+#define HYPERV_MSGTYPE_NONE		0
+#define HYPERV_MSGTYPE_CHANNEL		1
+#define HYPERV_MSGTYPE_TIMER_EXPIRED	0x80000010
+
+/*
  * Hypercall input values
  */
 #define HYPERCALL_POST_MESSAGE		0x005c
+
+/*
+ * Hypercall input parameters
+ */
+
+/*
+ * HYPERCALL_POST_MESSAGE
+ */
+#define HYPERCALL_POSTMSGIN_DSIZE_MAX	240
+#define HYPERCALL_POSTMSGIN_SIZE	256
+
+struct hypercall_postmsg_in {
+	uint32_t	hc_connid;
+	uint32_t	hc_rsvd;
+	uint32_t	hc_msgtype;	/* HYPERV_MSGTYPE_ */
+	uint32_t	hc_dsize;
+	uint8_t		hc_data[HYPERCALL_POSTMSGIN_DSIZE_MAX];
+} __packed;
+CTASSERT(sizeof(struct hypercall_postmsg_in) == HYPERCALL_POSTMSGIN_SIZE);
 
 #endif	/* !_HYPERV_REG_H_ */

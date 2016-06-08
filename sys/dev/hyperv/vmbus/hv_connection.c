@@ -39,6 +39,7 @@
 #include <vm/pmap.h>
 
 #include <dev/hyperv/vmbus/hv_vmbus_priv.h>
+#include <dev/hyperv/vmbus/hyperv_reg.h>
 #include <dev/hyperv/vmbus/vmbus_reg.h>
 #include <dev/hyperv/vmbus/vmbus_var.h>
 
@@ -330,7 +331,7 @@ int hv_vmbus_post_message(void *buffer, size_t bufferLen)
 	 */
 	for (retries = 0; retries < 20; retries++) {
 		ret = hv_vmbus_post_msg_via_msg_ipc(connId,
-		    VMBUS_MSGTYPE_CHANNEL, buffer, bufferLen);
+		    HYPERV_MSGTYPE_CHANNEL, buffer, bufferLen);
 		if (ret == HV_STATUS_SUCCESS)
 			return (0);
 
