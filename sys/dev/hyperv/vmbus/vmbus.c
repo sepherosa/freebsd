@@ -69,6 +69,12 @@ __FBSDID("$FreeBSD$");
 #include <contrib/dev/acpica/include/acpi.h>
 #include "acpi_if.h"
 
+/*
+ * NOTE: DO NOT CHANGE THESE
+ */
+#define VMBUS_CONNID_MESSAGE		1
+#define VMBUS_CONNID_EVENT		2
+
 struct vmbus_msghc {
 	struct hypercall_postmsg_in	*mh_inprm;
 	struct hyperv_dma		mh_inprm_dma;
@@ -176,6 +182,34 @@ vmbus_msghc_get1(struct vmbus_msghc_ctx *mhc, uint32_t dtor_flag)
 	mtx_unlock(&mhc->mhc_free_lock);
 
 	return mh;
+}
+
+struct vmbus_msghc *
+vmbus_msghc_get(struct vmbus_softc *sc, size_t dsize)
+{
+	struct hypercall_postmsg_in *inprm;
+	struct vmbus_msghc *mh;
+
+	if (dsize > HYPERCALL_POSTMSGIN_DSIZE_MAX)
+		return NULL;
+
+	mh = vmbus_msghc_get1(sc->vmbus_msg_hc, VMBUS_MSGHC_CTXF_DESTROY);
+	if (mh == NULL)
+		return NULL;
+
+	inprm = mh->mh_inprm;
+	memset(inprm, 0, HYPERCALL_POSTMSGIN_SIZE);
+	inprm->hc_connid = VMBUS_CONNID_MESSAGE;
+	inprm->hc_msgtype = HYPERV_MSGTYPE_CHANNEL;
+	inprm->hc_dsize = dsize;
+
+	return mh;
+}
+
+void *
+vmbus_msghc_dataptr(struct vmbus_msghc *mh)
+{
+	return mh->mh_inprm->hc_data;
 }
 
 static void

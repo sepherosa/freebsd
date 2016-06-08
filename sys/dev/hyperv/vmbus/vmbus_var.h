@@ -109,6 +109,7 @@ vmbus_get_device(void)
 struct hv_vmbus_channel;
 struct trapframe;
 struct vmbus_message;
+struct vmbus_msghc;
 
 void	vmbus_on_channel_open(const struct hv_vmbus_channel *);
 void	vmbus_event_proc(struct vmbus_softc *, int);
@@ -118,5 +119,8 @@ void	vmbus_handle_intr(struct trapframe *);
 void	vmbus_et_intr(struct trapframe *);
 
 void	vmbus_chan_msgproc(struct vmbus_softc *, const struct vmbus_message *);
+
+struct vmbus_msghc *vmbus_msghc_get(struct vmbus_softc *, size_t);
+void	*vmbus_msghc_dataptr(struct vmbus_msghc *);
 
 #endif	/* !_VMBUS_VAR_H_ */
