@@ -118,17 +118,11 @@ hv_vmbus_do_hypercall(uint64_t value, void *input, void *output)
 	    in_paddr, out_paddr);
 }
 
-static uint64_t
-hypercall(uint64_t in_val, bus_addr_t in_paddr, bus_addr_t out_paddr)
-{
-	return hypercall_md(hypercall_context.hc_addr, in_val, in_paddr,
-	    out_paddr);
-}
-
 uint64_t
 hypercall_post_message(bus_addr_t msg_paddr)
 {
-	return hypercall(HYPERCALL_POST_MESSAGE, msg_paddr, 0);
+	return hypercall_md(hypercall_context.hc_addr,
+	    HYPERCALL_POST_MESSAGE, msg_paddr, 0);
 }
 
 /**

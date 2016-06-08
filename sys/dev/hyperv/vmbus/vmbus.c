@@ -371,8 +371,6 @@ vmbus_init_contact(struct vmbus_softc *sc, uint32_t version)
 	struct vmbus_msghc *mh;
 	int error, supp = 0;
 
-	printf("resp %zu, old resp %zu\n", sizeof(*resp), sizeof(hv_vmbus_channel_version_response));
-
 	mh = vmbus_msghc_get(sc, sizeof(*req));
 	if (mh == NULL)
 		return ENXIO;
@@ -410,7 +408,7 @@ vmbus_init(struct vmbus_softc *sc)
 		error = vmbus_init_contact(sc, vmbus_version[i]);
 		if (!error) {
 			hv_vmbus_protocal_version = vmbus_version[i];
-			device_printf(sc->vmbus_dev, "version: %u.%u\n",
+			device_printf(sc->vmbus_dev, "version %u.%u\n",
 			    (hv_vmbus_protocal_version >> 16),
 			    (hv_vmbus_protocal_version & 0xffff));
 			return 0;
