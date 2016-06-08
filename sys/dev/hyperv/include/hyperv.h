@@ -77,10 +77,6 @@ typedef uint8_t	hv_bool_uint8_t;
 #define HV_VMBUS_VERSION_WIN8		((2 << 16) | (4))
 #define HV_VMBUS_VERSION_WIN8_1		((3 << 16) | (0))
 
-#define HV_VMBUS_VERSION_INVALID	-1
-
-#define HV_VMBUS_VERSION_CURRENT	HV_VMBUS_VERSION_WIN8_1
-
 /*
  * Make maximum size of pipe payload of 16K
  */

@@ -77,4 +77,34 @@ CTASSERT(sizeof(struct vmbus_evtflags) == VMBUS_EVTFLAGS_SIZE);
 #define VMBUS_CHAN_MAX_COMPAT	256
 #define VMBUS_CHAN_MAX		(VMBUS_EVTFLAG_LEN * VMBUS_EVTFLAGS_MAX)
 
+/*
+ * Channel messages
+ * - Embedded in vmbus_message.msg_data, e.g. response.
+ * - Embedded in hypercall_postmsg_in.hc_data, e.g. request.
+ */
+
+#define VMBUS_CHANMSG_TYPE_INIT_CONTACT		14	/* REQ */
+#define VMBUS_CHANMSG_TYPE_VERSION_RESP		15	/* RESP */
+
+struct vmbus_chanmsg_hdr {
+	uint32_t	chm_type;	/* VMBUS_CHANMSG_TYPE_ */
+	uint32_t	chm_rsvd;
+} __packed;
+
+/* VMBUS_CHANMSG_TYPE_INIT_CONTACT */
+struct vmbus_chanmsg_init_contact {
+	struct vmbus_chanmsg_hdr chm_hdr;
+	uint32_t	chm_ver;
+	uint32_t	chm_rsvd;
+	uint64_t	chm_evtflags;
+	uint64_t	chm_mnf1;
+	uint64_t	chm_mnf2;
+} __packed;
+
+/* VMBUS_CHANMSG_TYPE_VERSION_RESP */
+struct vmbus_chanmsg_version_resp {
+	struct vmbus_chanmsg_hdr chm_hdr;
+	uint8_t		chm_supp;
+} __packed;
+
 #endif	/* !_VMBUS_REG_H_ */

@@ -95,6 +95,10 @@ struct vmbus_msghc_ctx {
 
 #define VMBUS_MSGHC_CTXF_DESTROY	0x0001
 
+static int			vmbus_init(struct vmbus_softc *);
+static int			vmbus_init_contact(struct vmbus_softc *,
+				    uint32_t);
+
 static struct vmbus_msghc_ctx	*vmbus_msghc_ctx_create(bus_dma_tag_t);
 static void			vmbus_msghc_ctx_destroy(
 				    struct vmbus_msghc_ctx *);
@@ -107,6 +111,13 @@ static struct vmbus_msghc	*vmbus_msghc_get1(struct vmbus_msghc_ctx *,
 struct vmbus_softc	*vmbus_sc;
 
 extern inthand_t IDTVEC(vmbus_isr);
+
+static const uint32_t		vmbus_version[] = {
+	HV_VMBUS_VERSION_WIN8_1,
+	HV_VMBUS_VERSION_WIN8,
+	HV_VMBUS_VERSION_WIN7,
+	HV_VMBUS_VERSION_WS2008
+};
 
 static struct vmbus_msghc *
 vmbus_msghc_alloc(bus_dma_tag_t parent_dtag)
@@ -349,6 +360,63 @@ vmbus_msghc_wakeup(struct vmbus_softc *sc, const struct vmbus_message *msg)
 
 	mtx_unlock(&mhc->mhc_active_lock);
 	wakeup(&mhc->mhc_active);
+}
+
+static int
+vmbus_init_contact(struct vmbus_softc *sc, uint32_t version)
+{
+	struct vmbus_chanmsg_init_contact *req;
+	const struct vmbus_chanmsg_version_resp *resp;
+	const struct vmbus_message *msg;
+	struct vmbus_msghc *mh;
+	int error, supp = 0;
+
+	printf("resp %zu, old resp %zu\n", sizeof(*resp), sizeof(hv_vmbus_channel_version_response));
+
+	mh = vmbus_msghc_get(sc, sizeof(*req));
+	if (mh == NULL)
+		return ENXIO;
+
+	req = vmbus_msghc_dataptr(mh);
+	req->chm_hdr.chm_type = VMBUS_CHANMSG_TYPE_INIT_CONTACT;
+	req->chm_ver = version;
+	req->chm_evtflags = sc->vmbus_evtflags_dma.hv_paddr;
+	req->chm_mnf1 = sc->vmbus_mnf1_dma.hv_paddr;
+	req->chm_mnf2 = sc->vmbus_mnf2_dma.hv_paddr;
+
+	error = vmbus_msghc_exec(sc, mh);
+	if (error) {
+		vmbus_msghc_put(sc, mh);
+		return error;
+	}
+
+	msg = vmbus_msghc_wait_result(sc, mh);
+	resp = (const struct vmbus_chanmsg_version_resp *)msg->msg_data;
+	supp = resp->chm_supp;
+
+	vmbus_msghc_put(sc, mh);
+
+	return (supp ? 0 : EOPNOTSUPP);
+}
+
+static int
+vmbus_init(struct vmbus_softc *sc)
+{
+	int i;
+
+	for (i = 0; i < nitems(vmbus_version); ++i) {
+		int error;
+
+		error = vmbus_init_contact(sc, vmbus_version[i]);
+		if (!error) {
+			hv_vmbus_protocal_version = vmbus_version[i];
+			device_printf(sc->vmbus_dev, "version: %u.%u\n",
+			    (hv_vmbus_protocal_version >> 16),
+			    (hv_vmbus_protocal_version & 0xffff));
+			return 0;
+		}
+	}
+	return ENXIO;
 }
 
 static void
@@ -933,6 +1001,10 @@ vmbus_bus_init(void)
 	 * Connect to VMBus in the root partition
 	 */
 	ret = hv_vmbus_connect(sc);
+	if (ret != 0)
+		goto cleanup;
+
+	ret = vmbus_init(sc);
 	if (ret != 0)
 		goto cleanup;
 
