@@ -69,9 +69,132 @@ __FBSDID("$FreeBSD$");
 #include <contrib/dev/acpica/include/acpi.h>
 #include "acpi_if.h"
 
+struct vmbus_msghc {
+	struct hypercall_postmsg_in	*mh_inprm;
+	struct hyperv_dma		mh_inprm_dma;
+
+	struct vmbus_message		*mh_resp;
+	struct vmbus_message		mh_resp0;
+};
+
+struct vmbus_msghc_ctx {
+	struct vmbus_msghc		*mhc_free;
+	struct mtx			mhc_free_lock;
+	uint32_t			mhc_flags;
+
+	struct vmbus_msghc		*mhc_active;
+	struct mtx			mhc_active_lock;
+};
+
+#define VMBUS_MSGHC_CTXF_DESTROY	0x0001
+
+static struct vmbus_msghc_ctx	*vmbus_msghc_ctx_create(bus_dma_tag_t);
+static void			vmbus_msghc_ctx_destroy(
+				    struct vmbus_msghc_ctx *);
+static void			vmbus_msghc_ctx_free(struct vmbus_msghc_ctx *);
+static struct vmbus_msghc	*vmbus_msghc_alloc(bus_dma_tag_t);
+static void			vmbus_msghc_free(struct vmbus_msghc *);
+static struct vmbus_msghc	*vmbus_msghc_get1(struct vmbus_msghc_ctx *,
+				    uint32_t);
+
 struct vmbus_softc	*vmbus_sc;
 
 extern inthand_t IDTVEC(vmbus_isr);
+
+static struct vmbus_msghc *
+vmbus_msghc_alloc(bus_dma_tag_t parent_dtag)
+{
+	struct vmbus_msghc *mh;
+
+	mh = malloc(sizeof(*mh), M_DEVBUF, M_WAITOK | M_ZERO);
+
+	mh->mh_inprm = hyperv_dmamem_alloc(parent_dtag,
+	    HYPERCALL_POSTMSGIN_ALIGN, 0, HYPERCALL_POSTMSGIN_SIZE,
+	    &mh->mh_inprm_dma, BUS_DMA_WAITOK | BUS_DMA_ZERO);
+	if (mh->mh_inprm == NULL) {
+		free(mh, M_DEVBUF);
+		return NULL;
+	}
+	return mh;
+}
+
+static void
+vmbus_msghc_free(struct vmbus_msghc *mh)
+{
+	hyperv_dmamem_free(&mh->mh_inprm_dma, mh->mh_inprm);
+	free(mh, M_DEVBUF);
+}
+
+static void
+vmbus_msghc_ctx_free(struct vmbus_msghc_ctx *mhc)
+{
+	KASSERT(mhc->mhc_active == NULL, ("still have active msg hypercall"));
+	KASSERT(mhc->mhc_free == NULL, ("still have hypercall msg"));
+
+	mtx_destroy(&mhc->mhc_free_lock);
+	mtx_destroy(&mhc->mhc_active_lock);
+	free(mhc, M_DEVBUF);
+}
+
+static struct vmbus_msghc_ctx *
+vmbus_msghc_ctx_create(bus_dma_tag_t parent_dtag)
+{
+	struct vmbus_msghc_ctx *mhc;
+
+	mhc = malloc(sizeof(*mhc), M_DEVBUF, M_WAITOK | M_ZERO);
+	mtx_init(&mhc->mhc_free_lock, "vmbus msghc free", NULL, MTX_DEF);
+	mtx_init(&mhc->mhc_active_lock, "vmbus msghc act", NULL, MTX_DEF);
+
+	mhc->mhc_free = vmbus_msghc_alloc(parent_dtag);
+	if (mhc->mhc_free == NULL) {
+		vmbus_msghc_ctx_free(mhc);
+		return NULL;
+	}
+	return mhc;
+}
+
+static struct vmbus_msghc *
+vmbus_msghc_get1(struct vmbus_msghc_ctx *mhc, uint32_t dtor_flag)
+{
+	struct vmbus_msghc *mh;
+
+	mtx_lock(&mhc->mhc_free_lock);
+	while ((mhc->mhc_flags & dtor_flag) == 0 && mhc->mhc_free == NULL) {
+		mtx_sleep(&mhc->mhc_free, &mhc->mhc_free_lock, 0,
+		    "vmbus msghc", 0);
+	}
+	if (mhc->mhc_flags & dtor_flag) {
+		/* Being destroyed */
+		mh = NULL;
+	} else {
+		mh = mhc->mhc_free;
+		KASSERT(mh != NULL, ("no free hypercall msg"));
+		KASSERT(mh->mh_resp == NULL,
+		    ("hypercall msg has pending response"));
+		mhc->mhc_free = NULL;
+	}
+	mtx_unlock(&mhc->mhc_free_lock);
+
+	return mh;
+}
+
+static void
+vmbus_msghc_ctx_destroy(struct vmbus_msghc_ctx *mhc)
+{
+	struct vmbus_msghc *mh;
+
+	mtx_lock(&mhc->mhc_free_lock);
+	mhc->mhc_flags |= VMBUS_MSGHC_CTXF_DESTROY;
+	mtx_unlock(&mhc->mhc_free_lock);
+	wakeup(&mhc->mhc_free);
+
+	mh = vmbus_msghc_get1(mhc, 0);
+	if (mh == NULL)
+		panic("can't get msghc");
+
+	vmbus_msghc_free(mh);
+	vmbus_msghc_ctx_free(mhc);
+}
 
 static void
 vmbus_msg_task(void *xsc, int pending __unused)
@@ -620,6 +743,16 @@ vmbus_bus_init(void)
 	sc->vmbus_flags |= VMBUS_FLAG_ATTACHED;
 
 	/*
+	 * Create context for "post message" Hypercalls
+	 */
+	sc->vmbus_msg_hc = vmbus_msghc_ctx_create(
+	    bus_get_dma_tag(sc->vmbus_dev));
+	if (sc->vmbus_msg_hc == NULL) {
+		ret = ENXIO;
+		goto cleanup;
+	}
+
+	/*
 	 * Allocate DMA stuffs.
 	 */
 	ret = vmbus_dma_alloc(sc);
@@ -665,6 +798,10 @@ vmbus_bus_init(void)
 cleanup:
 	vmbus_intr_teardown(sc);
 	vmbus_dma_free(sc);
+	if (sc->vmbus_msg_hc != NULL) {
+		vmbus_msghc_ctx_destroy(sc->vmbus_msg_hc);
+		sc->vmbus_msg_hc = NULL;
+	}
 
 	return (ret);
 }
@@ -736,6 +873,11 @@ vmbus_detach(device_t dev)
 
 	vmbus_intr_teardown(sc);
 	vmbus_dma_free(sc);
+
+	if (sc->vmbus_msg_hc != NULL) {
+		vmbus_msghc_ctx_destroy(sc->vmbus_msg_hc);
+		sc->vmbus_msg_hc = NULL;
+	}
 
 	return (0);
 }

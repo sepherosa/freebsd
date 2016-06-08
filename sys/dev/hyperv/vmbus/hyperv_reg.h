@@ -153,6 +153,7 @@
  */
 #define HYPERCALL_POSTMSGIN_DSIZE_MAX	240
 #define HYPERCALL_POSTMSGIN_SIZE	256
+#define HYPERCALL_POSTMSGIN_ALIGN	8
 
 struct hypercall_postmsg_in {
 	uint32_t	hc_connid;
