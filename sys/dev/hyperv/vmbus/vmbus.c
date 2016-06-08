@@ -77,6 +77,7 @@ __FBSDID("$FreeBSD$");
 
 struct vmbus_msghc {
 	struct hypercall_postmsg_in	*mh_inprm;
+	struct hypercall_postmsg_in	mh_inprm_save;
 	struct hyperv_dma		mh_inprm_dma;
 
 	struct vmbus_message		*mh_resp;
@@ -165,9 +166,10 @@ vmbus_msghc_get1(struct vmbus_msghc_ctx *mhc, uint32_t dtor_flag)
 	struct vmbus_msghc *mh;
 
 	mtx_lock(&mhc->mhc_free_lock);
+
 	while ((mhc->mhc_flags & dtor_flag) == 0 && mhc->mhc_free == NULL) {
 		mtx_sleep(&mhc->mhc_free, &mhc->mhc_free_lock, 0,
-		    "vmbus msghc", 0);
+		    "gmsghc", 0);
 	}
 	if (mhc->mhc_flags & dtor_flag) {
 		/* Being destroyed */
@@ -179,6 +181,7 @@ vmbus_msghc_get1(struct vmbus_msghc_ctx *mhc, uint32_t dtor_flag)
 		    ("hypercall msg has pending response"));
 		mhc->mhc_free = NULL;
 	}
+
 	mtx_unlock(&mhc->mhc_free_lock);
 
 	return mh;
@@ -206,6 +209,21 @@ vmbus_msghc_get(struct vmbus_softc *sc, size_t dsize)
 	return mh;
 }
 
+void
+vmbus_msghc_put(struct vmbus_softc *sc, struct vmbus_msghc *mh)
+{
+	struct vmbus_msghc_ctx *mhc = sc->vmbus_msg_hc;
+
+	KASSERT(mhc->mhc_active == NULL, ("msg hypercall is active"));
+	mh->mh_resp = NULL;
+
+	mtx_lock(&mhc->mhc_free_lock);
+	KASSERT(mhc->mhc_free == NULL, ("has free hypercall msg"));
+	mhc->mhc_free = mh;
+	mtx_unlock(&mhc->mhc_free_lock);
+	wakeup(&mhc->mhc_free);
+}
+
 void *
 vmbus_msghc_dataptr(struct vmbus_msghc *mh)
 {
@@ -228,6 +246,109 @@ vmbus_msghc_ctx_destroy(struct vmbus_msghc_ctx *mhc)
 
 	vmbus_msghc_free(mh);
 	vmbus_msghc_ctx_free(mhc);
+}
+
+int
+vmbus_msghc_exec_noresult(struct vmbus_msghc *mh)
+{
+	sbintime_t time = SBT_1MS;
+	int i;
+
+	/*
+	 * Save the input parameter so that we could restore the input
+	 * parameter if the Hypercall failed.
+	 *
+	 * XXX
+	 * Is this really necessary?!  i.e. Will the Hypercall ever
+	 * overwrite the input parameter?
+	 */
+	memcpy(&mh->mh_inprm_save, mh->mh_inprm, HYPERCALL_POSTMSGIN_SIZE);
+
+	/*
+	 * In order to cope with transient failures, e.g. insufficient
+	 * resources on host side, we retry the post message Hypercall
+	 * several times.  20 retries seem sufficient.
+	 */
+#define HC_RETRY_MAX	20
+
+	for (i = 0; i < HC_RETRY_MAX; ++i) {
+		uint64_t status;
+
+		status = hypercall_post_message(mh->mh_inprm_dma.hv_paddr);
+		if (status == HYPERCALL_STATUS_SUCCESS)
+			return 0;
+
+		pause_sbt("hcpmsg", time, 0, C_HARDCLOCK);
+		if (time < SBT_1S * 2)
+			time *= 2;
+
+		/* Restore input parameter and try again */
+		memcpy(mh->mh_inprm, &mh->mh_inprm_save,
+		    HYPERCALL_POSTMSGIN_SIZE);
+	}
+
+#undef HC_RETRY_MAX
+
+	return EIO;
+}
+
+int
+vmbus_msghc_exec(struct vmbus_softc *sc, struct vmbus_msghc *mh)
+{
+	struct vmbus_msghc_ctx *mhc = sc->vmbus_msg_hc;
+	int error;
+
+	KASSERT(mh->mh_resp == NULL, ("hypercall msg has pending response"));
+
+	mtx_lock(&mhc->mhc_active_lock);
+	KASSERT(mhc->mhc_active == NULL, ("pending active msg hypercall"));
+	mhc->mhc_active = mh;
+	mtx_unlock(&mhc->mhc_active_lock);
+
+	error = vmbus_msghc_exec_noresult(mh);
+	if (error) {
+		mtx_lock(&mhc->mhc_active_lock);
+		KASSERT(mhc->mhc_active == mh, ("msghc mismatch"));
+		mhc->mhc_active = NULL;
+		mtx_unlock(&mhc->mhc_active_lock);
+	}
+	return error;
+}
+
+const struct vmbus_message *
+vmbus_msghc_wait_result(struct vmbus_softc *sc, struct vmbus_msghc *mh)
+{
+	struct vmbus_msghc_ctx *mhc = sc->vmbus_msg_hc;
+
+	mtx_lock(&mhc->mhc_active_lock);
+
+	KASSERT(mhc->mhc_active == mh, ("msghc mismatch"));
+	while (mh->mh_resp == NULL) {
+		mtx_sleep(&mhc->mhc_active, &mhc->mhc_active_lock, 0,
+		    "wmsghc", 0);
+	}
+	mhc->mhc_active = NULL;
+
+	mtx_unlock(&mhc->mhc_active_lock);
+
+	return mh->mh_resp;
+}
+
+void
+vmbus_msghc_wakeup(struct vmbus_softc *sc, const struct vmbus_message *msg)
+{
+	struct vmbus_msghc_ctx *mhc = sc->vmbus_msg_hc;
+	struct vmbus_msghc *mh;
+
+	mtx_lock(&mhc->mhc_active_lock);
+
+	mh = mhc->mhc_active;
+	KASSERT(mh != NULL, ("no pending msg hypercall"));
+	memcpy(&mh->mh_resp0, msg, sizeof(mh->mh_resp0));
+	mh->mh_resp = &mh->mh_resp0;
+
+	mtx_unlock(&mhc->mhc_active_lock);
+	wakeup(&mhc->mhc_active);
 }
 
 static void

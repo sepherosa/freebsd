@@ -140,6 +140,11 @@
 #define HYPERV_MSGTYPE_TIMER_EXPIRED	0x80000010
 
 /*
+ * Hypercall status codes
+ */
+#define HYPERCALL_STATUS_SUCCESS	0x0000
+
+/*
  * Hypercall input values
  */
 #define HYPERCALL_POST_MESSAGE		0x005c

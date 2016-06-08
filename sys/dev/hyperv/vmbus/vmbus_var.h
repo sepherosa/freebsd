@@ -121,6 +121,12 @@ void	vmbus_et_intr(struct trapframe *);
 void	vmbus_chan_msgproc(struct vmbus_softc *, const struct vmbus_message *);
 
 struct vmbus_msghc *vmbus_msghc_get(struct vmbus_softc *, size_t);
+void	vmbus_msghc_put(struct vmbus_softc *, struct vmbus_msghc *);
 void	*vmbus_msghc_dataptr(struct vmbus_msghc *);
+int	vmbus_msghc_exec_noresult(struct vmbus_msghc *);
+int	vmbus_msghc_exec(struct vmbus_softc *, struct vmbus_msghc *);
+const struct vmbus_message *vmbus_msghc_wait_result(struct vmbus_softc *,
+	    struct vmbus_msghc *);
+void	vmbus_msghc_wakeup(struct vmbus_softc *, const struct vmbus_message *);
 
 #endif	/* !_VMBUS_VAR_H_ */
