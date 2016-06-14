@@ -603,7 +603,6 @@ tcp_lro_rx2(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum, int use_hash)
 	int error, ip_len, l;
 	uint16_t eh_type, tcp_data_len;
 	struct lro_head *bucket;
-	uint32_t hash;
 
 	/* We expect a contiguous header [eh, ip, tcp]. */
 
@@ -698,11 +697,11 @@ tcp_lro_rx2(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum, int use_hash)
 
 	if (!use_hash) {
 		bucket = &lc->lro_hash[0];
-		goto find;
-	}
-	if (M_HASHTYPE_ISHASH(m)) {
-		hash = m->m_pkthdr.flowid;
+	} else if (M_HASHTYPE_ISHASH(m)) {
+		bucket = &lc->lro_hash[m->m_pkthdr.flowid % lc->lro_hashsz];
 	} else {
+		uint32_t hash;
+
 		switch (eh_type) {
 #ifdef INET
 		case ETHERTYPE_IP:
@@ -726,9 +725,9 @@ tcp_lro_rx2(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum, int use_hash)
 			break;
 		}
 		hash += th->th_sport + th->th_dport;
+		bucket = &lc->lro_hash[hash % lc->lro_hashsz];
 	}
-	bucket = &lc->lro_hash[hash % lc->lro_hashsz];
-find:
+
 	/* Try to find a matching previous segment. */
 	LIST_FOREACH(le, bucket, hash_next) {
 		if (le->eh_type != eh_type)
