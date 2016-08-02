@@ -42,6 +42,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
+#include <sys/sysctl.h>
 
 #include <net/if.h>
 #include <net/if_var.h>
@@ -55,6 +56,7 @@ __FBSDID("$FreeBSD$");
 #include <netinet/ip_var.h>
 #include <netinet/tcp.h>
 #include <netinet/tcp_lro.h>
+#include <netinet/tcp_var.h>
 
 #include <netinet6/ip6_var.h>
 
@@ -70,6 +72,13 @@ static MALLOC_DEFINE(M_LRO, "LRO", "LRO control structures");
 static void	tcp_lro_rx_done(struct lro_ctrl *lc);
 static int	tcp_lro_rx2(struct lro_ctrl *lc, struct mbuf *m,
 		    uint32_t csum, int use_hash);
+
+SYSCTL_NODE(_net_inet_tcp, OID_AUTO, lro,  CTLFLAG_RW | CTLFLAG_MPSAFE, 0,
+    "TCP LRO");
+
+static int	tcp_lro_hash_sorted;
+SYSCTL_INT(_net_inet_tcp_lro, OID_AUTO, hash_sorted,
+    CTLFLAG_RDTUN | CTLFLAG_MPSAFE, &tcp_lro_hash_sorted, 0, "hash sorted LRO");
 
 static __inline void
 tcp_lro_active_insert(struct lro_ctrl *lc, struct lro_head *bucket,
@@ -511,7 +520,7 @@ tcp_lro_flush_all(struct lro_ctrl *lc)
 		}
 
 		/* add packet to LRO engine */
-		if (tcp_lro_rx2(lc, mb, 0, 0) != 0) {
+		if (tcp_lro_rx2(lc, mb, 0, tcp_lro_hash_sorted) != 0) {
 			/* input packet to network layer */
 			(*lc->ifp->if_input)(lc->ifp, mb);
 			lc->lro_queued++;
