@@ -612,6 +612,7 @@ tcp_lro_rx2(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum, int use_hash)
 	int error, ip_len, l;
 	uint16_t eh_type, tcp_data_len;
 	struct lro_head *bucket;
+	int force_flush = 0;
 
 	/* We expect a contiguous header [eh, ip, tcp]. */
 
@@ -678,8 +679,15 @@ tcp_lro_rx2(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum, int use_hash)
 	 * Check TCP header constraints.
 	 */
 	/* Ensure no bits set besides ACK or PSH. */
-	if ((th->th_flags & ~(TH_ACK | TH_PUSH)) != 0)
-		return (TCP_LRO_CANNOT);
+	if ((th->th_flags & ~(TH_ACK | TH_PUSH)) != 0) {
+		if (th->th_flags & TH_SYN)
+			return (TCP_LRO_CANNOT);
+		/*
+		 * Make sure that previously seen segements/ACKs are delivered
+		 * before this segement, e.g. FIN.
+		 */
+		force_flush = 1;
+	}
 
 	/* XXX-BZ We lose a ACK|PUSH flag concatenating multiple segments. */
 	/* XXX-BZ Ideally we'd flush on PUSH? */
@@ -695,8 +703,13 @@ tcp_lro_rx2(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum, int use_hash)
 	ts_ptr = (uint32_t *)(th + 1);
 	if (l != 0 && (__predict_false(l != TCPOLEN_TSTAMP_APPA) ||
 	    (*ts_ptr != ntohl(TCPOPT_NOP<<24|TCPOPT_NOP<<16|
-	    TCPOPT_TIMESTAMP<<8|TCPOLEN_TIMESTAMP))))
-		return (TCP_LRO_CANNOT);
+	    TCPOPT_TIMESTAMP<<8|TCPOLEN_TIMESTAMP)))) {
+		/*
+		 * Make sure that previously seen segements/ACKs are delivered
+		 * before this segement.
+		 */
+		force_flush = 1;
+	}
 
 	/* If the driver did not pass in the checksum, set it now. */
 	if (csum == 0x0000)
@@ -761,6 +774,13 @@ tcp_lro_rx2(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum, int use_hash)
 				continue;
 			break;
 #endif
+		}
+
+		if (force_flush) {
+			/* Timestamps mismatch; this is a FIN, etc */
+			tcp_lro_active_remove(le);
+			tcp_lro_flush(lc, le);
+			return (TCP_LRO_CANNOT);
 		}
 
 		/* Flush now if appending will result in overflow. */
@@ -837,6 +857,14 @@ tcp_lro_rx2(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum, int use_hash)
 			getmicrotime(&le->mtime);
 
 		return (0);
+	}
+
+	if (force_flush) {
+		/*
+		 * Nothing to flush, but this segment can not be further
+		 * aggregated/delayed.
+		 */
+		return (TCP_LRO_CANNOT);
 	}
 
 	/* Try to find an empty slot. */
