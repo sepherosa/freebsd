@@ -726,7 +726,7 @@ static uint8_t netvsc_hash_key[HASH_KEYLEN] = {
 /*
  * RNDIS set vRSS parameters
  */
-static int
+int
 hv_rf_set_rss_param(rndis_device *device, const uint8_t *key, int num_queue)
 {
 	rndis_request *request;

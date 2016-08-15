@@ -125,5 +125,7 @@ int hv_rf_on_device_remove(struct hn_softc *sc, boolean_t destroy_channel);
 int hv_rf_on_open(struct hn_softc *sc);
 int hv_rf_on_close(struct hn_softc *sc);
 
+int hv_rf_set_rss_param(rndis_device *device, const uint8_t *key, int num_queue);
+
 #endif  /* __HV_RNDIS_FILTER_H__ */
 

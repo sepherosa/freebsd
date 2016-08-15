@@ -327,6 +327,7 @@ static void hn_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr);
 static int hn_lro_lenlim_sysctl(SYSCTL_HANDLER_ARGS);
 static int hn_lro_ackcnt_sysctl(SYSCTL_HANDLER_ARGS);
 #endif
+static int hn_change_key_sysctl(SYSCTL_HANDLER_ARGS);
 static int hn_trust_hcsum_sysctl(SYSCTL_HANDLER_ARGS);
 static int hn_tx_chimney_size_sysctl(SYSCTL_HANDLER_ARGS);
 static int hn_rx_stat_ulong_sysctl(SYSCTL_HANDLER_ARGS);
@@ -1958,6 +1959,32 @@ hn_lro_ackcnt_sysctl(SYSCTL_HANDLER_ARGS)
 
 #endif
 
+static const uint8_t dup_key[] = {
+	0x6d, 0x5a, 0x6d, 0x5a, 0x6d, 0x5a, 0x6d, 0x5a,
+	0x6d, 0x5a, 0x6d, 0x5a, 0x6d, 0x5a, 0x6d, 0x5a,
+	0x6d, 0x5a, 0x6d, 0x5a, 0x6d, 0x5a, 0x6d, 0x5a,
+	0x6d, 0x5a, 0x6d, 0x5a, 0x6d, 0x5a, 0x6d, 0x5a,
+	0x6d, 0x5a, 0x6d, 0x5a, 0x6d, 0x5a, 0x6d, 0x5a
+};
+
+static int
+hn_change_key_sysctl(SYSCTL_HANDLER_ARGS)
+{
+	struct hn_softc *sc = arg1;
+	int val = 0, error;
+
+	error = sysctl_handle_int(oidp, &val, 0, req);
+	if (error || req->newptr == NULL)
+		return error;
+
+	hv_rf_on_close(sc);
+	hv_rf_set_rss_param(sc->net_dev->extension, dup_key,
+	    sc->net_dev->num_channel);
+	hv_rf_on_open(sc);
+
+	return 0;
+}
+
 static int
 hn_trust_hcsum_sysctl(SYSCTL_HANDLER_ARGS)
 {
@@ -2336,6 +2363,9 @@ hn_create_rx_data(struct hn_softc *sc, int ring_cnt)
 	    CTLFLAG_RD, &sc->hn_rx_ring_cnt, 0, "# created RX rings");
 	SYSCTL_ADD_INT(ctx, child, OID_AUTO, "rx_ring_inuse",
 	    CTLFLAG_RD, &sc->hn_rx_ring_inuse, 0, "# used RX rings");
+	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "change_key",
+	    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_MPSAFE, sc, 0,
+	    hn_change_key_sysctl, "I", "LRO queued");
 }
 
 static void
