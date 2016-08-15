@@ -727,7 +727,7 @@ static uint8_t netvsc_hash_key[HASH_KEYLEN] = {
  * RNDIS set vRSS parameters
  */
 static int
-hv_rf_set_rss_param(rndis_device *device, int num_queue)
+hv_rf_set_rss_param(rndis_device *device, const uint8_t *key, int num_queue)
 {
 	rndis_request *request;
 	rndis_set_request *set;
@@ -777,7 +777,7 @@ hv_rf_set_rss_param(rndis_device *device, int num_queue)
 	/* Set hash key values */
 	keyp = (uint8_t *)((unsigned long)rssp + rssp->hashkey_offset);
 	for (i = 0; i < HASH_KEYLEN; i++)
-		keyp[i] = netvsc_hash_key[i];
+		keyp[i] = key[i];
 
 	ret = hv_rf_send_request(device, request, REMOTE_NDIS_SET_MSG);
 	if (ret != 0) {
@@ -789,37 +789,27 @@ hv_rf_set_rss_param(rndis_device *device, int num_queue)
 	 * us when the response has arrived.  In the failure case,
 	 * sema_timedwait() returns a non-zero status after waiting 5 seconds.
 	 */
-	ret = sema_timedwait(&request->wait_sema, 5 * hz);
-	if (ret == 0) {
-		/* Response received, check status */
-		set_complete = &request->response_msg.msg.set_complete;
-		status = set_complete->status;
-		if (status != RNDIS_STATUS_SUCCESS) {
-			/* Bad response status, return error */
-			if (bootverbose)
-				printf("Netvsc: Failed to set vRSS "
-				    "parameters.\n");
-			ret = -2;
-		} else {
-			if (bootverbose)
-				printf("Netvsc: Successfully set vRSS "
-				    "parameters.\n");
-		}
+	sema_wait(&request->wait_sema);
+
+	/* Response received, check status */
+	set_complete = &request->response_msg.msg.set_complete;
+	status = set_complete->status;
+	if (status != RNDIS_STATUS_SUCCESS) {
+		/* Bad response status, return error */
+		if (bootverbose)
+			printf("Netvsc: Failed to set vRSS "
+			    "parameters.\n");
+		ret = -2;
 	} else {
-		/*
-		 * We cannot deallocate the request since we may still
-		 * receive a send completion for it.
-		 */
-		printf("Netvsc: vRSS set timeout, id = %u, ret = %d\n",
-		    request->request_msg.msg.init_request.request_id, ret);
-		goto exit;
+		if (bootverbose)
+			printf("Netvsc: Successfully set vRSS "
+			    "parameters.\n");
 	}
 
 cleanup:
 	if (request != NULL) {
 		hv_put_rndis_request(device, request);
 	}
-exit:
 	return (ret);
 }
 
@@ -1219,7 +1209,8 @@ hv_rf_on_device_add(struct hn_softc *sc, void *additl_info,
 	}
 	net_dev->num_channel = nsubch + 1;
 
-	ret = hv_rf_set_rss_param(rndis_dev, net_dev->num_channel);
+	ret = hv_rf_set_rss_param(rndis_dev, netvsc_hash_key,
+	    net_dev->num_channel);
 
 out:
 	if (ret)
