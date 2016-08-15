@@ -1015,6 +1015,7 @@ hv_rf_open_device(rndis_device *device)
 	}
 
 	if (ret == 0) {
+		printf("HN: opened\n");
 		device->state = RNDIS_DEV_DATAINITIALIZED;
 	}
 
@@ -1035,6 +1036,7 @@ hv_rf_close_device(rndis_device *device)
 
 	ret = hv_rf_set_packet_filter(device, 0);
 	if (ret == 0) {
+		printf("HN: closed\n");
 		device->state = RNDIS_DEV_INITIALIZED;
 	}
 
