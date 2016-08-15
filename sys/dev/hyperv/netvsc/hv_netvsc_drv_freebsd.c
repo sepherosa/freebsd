@@ -1432,6 +1432,10 @@ skip:
 
 			case NDIS_HASH_TCP_IPV4:
 				hash_type = M_HASHTYPE_RSS_TCP_IPV4;
+				if (ifp->if_dunit == 1) {
+					if_printf(ifp, "tcp hash value %x\n",
+					    hash_value->hash_value);
+				}
 				break;
 
 			case NDIS_HASH_IPV6:
