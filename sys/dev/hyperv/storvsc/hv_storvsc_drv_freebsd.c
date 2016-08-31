@@ -2325,3 +2325,14 @@ storvsc_get_storage_type(device_t dev)
 		return DRIVER_STORVSC;
 	return DRIVER_UNKNOWN;
 }
+
+static void
+storvsc_ident(void *arg __unused)
+{
+	if (vm_guest != VM_GUEST_HV)
+		return;
+	/* Enlightened SCSI driver is going to take over disks. */
+	vm_guest = VM_GUEST_HV_SCSI;
+}
+/* SI_ORDER_SECOND - MUST after Hypercall creation */
+SYSINIT(storvsc_ident, SI_SUB_DRIVERS, SI_ORDER_SECOND, storvsc_ident, NULL);
