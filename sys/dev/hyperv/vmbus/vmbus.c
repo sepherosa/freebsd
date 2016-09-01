@@ -996,7 +996,7 @@ vmbus_probe(device_t dev)
 	char *id[] = { "VMBUS", NULL };
 
 	if (ACPI_ID_PROBE(device_get_parent(dev), dev, id) == NULL ||
-	    device_get_unit(dev) != 0 || !VM_GUEST_IS_HYPERV ||
+	    device_get_unit(dev) != 0 || vm_guest != VM_GUEST_HV ||
 	    (hyperv_features & CPUID_HV_MSR_SYNIC) == 0)
 		return (ENXIO);
 
@@ -1177,7 +1177,7 @@ vmbus_sysinit(void *arg __unused)
 {
 	struct vmbus_softc *sc = vmbus_get_softc();
 
-	if (!VM_GUEST_IS_HYPERV || sc == NULL)
+	if (vm_guest != VM_GUEST_HV || sc == NULL)
 		return;
 
 	/* 

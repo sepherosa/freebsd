@@ -73,7 +73,6 @@ __FBSDID("$FreeBSD$");
 #include <dev/pci/pcireg.h>
 #include <dev/ata/ata-all.h>
 #include <dev/ata/ata-pci.h>
-#include <dev/hyperv/include/hyperv.h>
 #include <ata_if.h>
 
 /* prototypes */
@@ -95,7 +94,7 @@ hv_ata_pci_probe(device_t dev)
 	/*
 	 * Don't probe if not running in a Hyper-V environment
 	 */
-	if (!VM_GUEST_IS_HYPERV)
+	if (vm_guest != VM_GUEST_HV)
 		return (ENXIO);
 
 	if (device_get_unit(parent) != 0 || device_get_ivars(dev) != 0)

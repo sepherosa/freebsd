@@ -36,9 +36,6 @@
 #include <vm/vm.h>
 #include <vm/pmap.h>
 
-#define VM_GUEST_IS_HYPERV	\
-	(vm_guest == VM_GUEST_HV || vm_guest == VM_GUEST_HV_SCSI)
-
 struct hyperv_guid {
 	uint8_t		hv_guid[16];
 } __packed;

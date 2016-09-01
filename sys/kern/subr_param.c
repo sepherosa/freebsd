@@ -149,7 +149,6 @@ static const char *const vm_guest_sysctl_names[] = {
 	"hv",
 	"vmware",
 	"kvm",
-	"hv",		/* Hyper-V w/ SCSI driver */
 	NULL
 };
 CTASSERT(nitems(vm_guest_sysctl_names) - 1 == VM_LAST);
