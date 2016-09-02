@@ -844,23 +844,21 @@ hv_nv_on_channel_callback(struct vmbus_channel *chan, void *xrxr)
 		bytes_rxed = bufferlen;
 		ret = vmbus_chan_recv_pkt(chan, pkt, &bytes_rxed);
 		if (ret == 0) {
-			if (bytes_rxed > 0) {
-				switch (pkt->cph_type) {
-				case VMBUS_CHANPKT_TYPE_COMP:
-					hv_nv_on_send_completion(sc, chan, pkt);
-					break;
-				case VMBUS_CHANPKT_TYPE_RXBUF:
-					hv_nv_on_receive(sc, rxr, chan, pkt);
-					break;
-				case VMBUS_CHANPKT_TYPE_INBAND:
-					hn_proc_notify(sc, pkt);
-					break;
-				default:
-					if_printf(rxr->hn_ifp,
-					    "unknown chan pkt %u\n",
-					    pkt->cph_type);
-					break;
-				}
+			switch (pkt->cph_type) {
+			case VMBUS_CHANPKT_TYPE_COMP:
+				hv_nv_on_send_completion(sc, chan, pkt);
+				break;
+			case VMBUS_CHANPKT_TYPE_RXBUF:
+				hv_nv_on_receive(sc, rxr, chan, pkt);
+				break;
+			case VMBUS_CHANPKT_TYPE_INBAND:
+				hn_proc_notify(sc, pkt);
+				break;
+			default:
+				if_printf(rxr->hn_ifp,
+				    "unknown chan pkt %u\n",
+				    pkt->cph_type);
+				break;
 			}
 		} else if (ret == ENOBUFS) {
 			/* Handle large packet */
