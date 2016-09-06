@@ -128,11 +128,11 @@ struct rndis_packet_msg {
 	 __offsetof(struct rndis_packet_msg, rm_dataoffset))
 
 /* Offset from the beginning of rndis_packet_msg. */
-#define RNDIS_PACKET_MSG_OFFSET_ABS(ofs)	\
+#define	RNDIS_PACKET_MSG_OFFSET_ABS(ofs)	\
 	((ofs) + __offsetof(struct rndis_packet_msg, rm_dataoffset))
 
-#define RNDIS_PACKET_MSG_OFFSET_ALIGN		4
-#define RNDIS_PACKET_MSG_OFFSET_ALIGNMASK	\
+#define	RNDIS_PACKET_MSG_OFFSET_ALIGN		4
+#define	RNDIS_PACKET_MSG_OFFSET_ALIGNMASK	\
 	(RNDIS_PACKET_MSG_OFFSET_ALIGN - 1)
 
 /* Per-packet-info for RNDIS data message */
