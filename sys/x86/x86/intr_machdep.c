@@ -46,7 +46,6 @@
 #include <sys/mutex.h>
 #include <sys/proc.h>
 #include <sys/smp.h>
-#include <sys/sx.h>
 #include <sys/syslog.h>
 #include <sys/systm.h>
 #include <machine/clock.h>
@@ -74,7 +73,7 @@ typedef void (*mask_fn)(void *);
 
 static int intrcnt_index;
 static struct intsrc *interrupt_sources[NUM_IO_INTS];
-static struct sx intr_table_lock;
+static struct mtx intr_table_lock;
 static struct mtx intrcnt_lock;
 static TAILQ_HEAD(pics_head, pic) pics;
 
@@ -118,14 +117,14 @@ intr_register_pic(struct pic *pic)
 {
 	int error;
 
-	sx_xlock(&intr_table_lock);
+	mtx_lock(&intr_table_lock);
 	if (intr_pic_registered(pic))
 		error = EBUSY;
 	else {
 		TAILQ_INSERT_TAIL(&pics, pic, pics);
 		error = 0;
 	}
-	sx_xunlock(&intr_table_lock);
+	mtx_unlock(&intr_table_lock);
 	return (error);
 }
 
@@ -149,16 +148,16 @@ intr_register_source(struct intsrc *isrc)
 	    vector);
 	if (error)
 		return (error);
-	sx_xlock(&intr_table_lock);
+	mtx_lock(&intr_table_lock);
 	if (interrupt_sources[vector] != NULL) {
-		sx_xunlock(&intr_table_lock);
+		mtx_unlock(&intr_table_lock);
 		intr_event_destroy(isrc->is_event);
 		return (EEXIST);
 	}
 	intrcnt_register(isrc);
 	interrupt_sources[vector] = isrc;
 	isrc->is_handlers = 0;
-	sx_xunlock(&intr_table_lock);
+	mtx_unlock(&intr_table_lock);
 	return (0);
 }
 
@@ -182,14 +181,14 @@ intr_add_handler(const char *name, int vector, driver_filter_t filter,
 	error = intr_event_add_handler(isrc->is_event, name, filter, handler,
 	    arg, intr_priority(flags), flags, cookiep);
 	if (error == 0) {
-		sx_xlock(&intr_table_lock);
+		mtx_lock(&intr_table_lock);
 		intrcnt_updatename(isrc);
 		isrc->is_handlers++;
 		if (isrc->is_handlers == 1) {
 			isrc->is_pic->pic_enable_intr(isrc);
 			isrc->is_pic->pic_enable_source(isrc);
 		}
-		sx_xunlock(&intr_table_lock);
+		mtx_unlock(&intr_table_lock);
 	}
 	return (error);
 }
@@ -203,14 +202,14 @@ intr_remove_handler(void *cookie)
 	isrc = intr_handler_source(cookie);
 	error = intr_event_remove_handler(cookie);
 	if (error == 0) {
-		sx_xlock(&intr_table_lock);
+		mtx_lock(&intr_table_lock);
 		isrc->is_handlers--;
 		if (isrc->is_handlers == 0) {
 			isrc->is_pic->pic_disable_source(isrc, PIC_NO_EOI);
 			isrc->is_pic->pic_disable_intr(isrc);
 		}
 		intrcnt_updatename(isrc);
-		sx_xunlock(&intr_table_lock);
+		mtx_unlock(&intr_table_lock);
 	}
 	return (error);
 }
@@ -284,12 +283,12 @@ intr_resume(bool suspend_cancelled)
 #ifndef DEV_ATPIC
 	atpic_reset();
 #endif
-	sx_xlock(&intr_table_lock);
+	mtx_lock(&intr_table_lock);
 	TAILQ_FOREACH(pic, &pics, pics) {
 		if (pic->pic_resume != NULL)
 			pic->pic_resume(pic, suspend_cancelled);
 	}
-	sx_xunlock(&intr_table_lock);
+	mtx_unlock(&intr_table_lock);
 }
 
 void
@@ -297,12 +296,12 @@ intr_suspend(void)
 {
 	struct pic *pic;
 
-	sx_xlock(&intr_table_lock);
+	mtx_lock(&intr_table_lock);
 	TAILQ_FOREACH_REVERSE(pic, &pics, pics_head, pics) {
 		if (pic->pic_suspend != NULL)
 			pic->pic_suspend(pic);
 	}
-	sx_xunlock(&intr_table_lock);
+	mtx_unlock(&intr_table_lock);
 }
 
 static int
@@ -323,9 +322,9 @@ intr_assign_cpu(void *arg, int cpu)
 	if (assign_cpu && cpu != NOCPU) {
 #endif
 		isrc = arg;
-		sx_xlock(&intr_table_lock);
+		mtx_lock(&intr_table_lock);
 		error = isrc->is_pic->pic_assign_cpu(isrc, cpu_apic_ids[cpu]);
-		sx_xunlock(&intr_table_lock);
+		mtx_unlock(&intr_table_lock);
 	} else
 		error = 0;
 	return (error);
@@ -385,7 +384,7 @@ intr_init(void *dummy __unused)
 	intrcnt_setname("???", 0);
 	intrcnt_index = 1;
 	TAILQ_INIT(&pics);
-	sx_init(&intr_table_lock, "intr sources");
+	mtx_init(&intr_table_lock, "intr sources", NULL, MTX_DEF);
 	mtx_init(&intrcnt_lock, "intrcnt", NULL, MTX_SPIN);
 }
 SYSINIT(intr_init, SI_SUB_INTR, SI_ORDER_FIRST, intr_init, NULL);
@@ -450,7 +449,7 @@ intr_reprogram(void)
 	struct intsrc *is;
 	int v;
 
-	sx_xlock(&intr_table_lock);
+	mtx_lock(&intr_table_lock);
 	for (v = 0; v < NUM_IO_INTS; v++) {
 		is = interrupt_sources[v];
 		if (is == NULL)
@@ -458,7 +457,7 @@ intr_reprogram(void)
 		if (is->is_pic->pic_reprogram_pin != NULL)
 			is->is_pic->pic_reprogram_pin(is);
 	}
-	sx_xunlock(&intr_table_lock);
+	mtx_unlock(&intr_table_lock);
 }
 
 #ifdef DDB
@@ -563,7 +562,7 @@ intr_shuffle_irqs(void *arg __unused)
 		return;
 
 	/* Round-robin assign a CPU to each enabled source. */
-	sx_xlock(&intr_table_lock);
+	mtx_lock(&intr_table_lock);
 	assign_cpu = 1;
 	for (i = 0; i < NUM_IO_INTS; i++) {
 		isrc = interrupt_sources[i];
@@ -584,7 +583,7 @@ intr_shuffle_irqs(void *arg __unused)
 
 		}
 	}
-	sx_xunlock(&intr_table_lock);
+	mtx_unlock(&intr_table_lock);
 }
 SYSINIT(intr_shuffle_irqs, SI_SUB_SMP, SI_ORDER_SECOND, intr_shuffle_irqs,
     NULL);
