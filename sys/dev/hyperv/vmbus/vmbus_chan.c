@@ -63,7 +63,8 @@ static int			vmbus_chan_release(struct vmbus_channel *);
 
 static void			vmbus_chan_task(void *, int);
 static void			vmbus_chan_task_nobatch(void *, int);
-static void			vmbus_chan_detach_task(void *, int);
+static void			vmbus_prichan_detach_task(void *, int);
+static void			vmbus_subchan_detach_task(void *, int);
 
 static void			vmbus_chan_msgproc_choffer(struct vmbus_softc *,
 				    const struct vmbus_message *);
@@ -969,7 +970,6 @@ vmbus_chan_alloc(struct vmbus_softc *sc)
 	chan->ch_vmbus = sc;
 	mtx_init(&chan->ch_subchan_lock, "vmbus subchan", NULL, MTX_DEF);
 	TAILQ_INIT(&chan->ch_subchans);
-	TASK_INIT(&chan->ch_detach_task, 0, vmbus_chan_detach_task, chan);
 	vmbus_rxbr_init(&chan->ch_rxbr);
 	vmbus_txbr_init(&chan->ch_txbr);
 
@@ -1127,6 +1127,7 @@ vmbus_chan_msgproc_choffer(struct vmbus_softc *sc,
 {
 	const struct vmbus_chanmsg_choffer *offer;
 	struct vmbus_channel *chan;
+	task_fn_t *detach_fn;
 	int error;
 
 	offer = (const struct vmbus_chanmsg_choffer *)msg->msg_data;
@@ -1175,6 +1176,15 @@ vmbus_chan_msgproc_choffer(struct vmbus_softc *sc,
 	    &sc->vmbus_tx_evtflags[chan->ch_id >> VMBUS_EVTFLAG_SHIFT];
 	chan->ch_evtflag_mask = 1UL << (chan->ch_id & VMBUS_EVTFLAG_MASK);
 
+	/*
+	 * Setup detach task.
+	 */
+	if (VMBUS_CHAN_ISPRIMARY(chan))
+		detach_fn = vmbus_prichan_detach_task;
+	else
+		detach_fn = vmbus_subchan_detach_task;
+	TASK_INIT(&chan->ch_detach_task, 0, detach_fn, chan);
+
 	/* Select default cpu for this channel. */
 	vmbus_chan_cpu_default(chan);
 
@@ -1207,6 +1217,7 @@ vmbus_chan_msgproc_chrescind(struct vmbus_softc *sc,
 {
 	const struct vmbus_chanmsg_chrescind *note;
 	struct vmbus_channel *chan;
+	struct taskqueue *tq;
 
 	note = (const struct vmbus_chanmsg_chrescind *)msg->msg_data;
 	if (note->chm_chanid > VMBUS_CHAN_MAX) {
@@ -1225,7 +1236,11 @@ vmbus_chan_msgproc_chrescind(struct vmbus_softc *sc,
 		return;
 	sc->vmbus_chmap[note->chm_chanid] = NULL;
 
-	taskqueue_enqueue(sc->vmbus_devtq, &chan->ch_detach_task);
+	if (VMBUS_CHAN_ISPRIMARY(chan))
+		tq = sc->vmbus_devtq;
+	else
+		tq = sc->vmbus_subchtq;
+	taskqueue_enqueue(tq, &chan->ch_detach_task);
 }
 
 static int
@@ -1263,32 +1278,41 @@ vmbus_chan_release(struct vmbus_channel *chan)
 }
 
 static void
-vmbus_chan_detach_task(void *xchan, int pending __unused)
+vmbus_prichan_detach_task(void *xchan, int pending __unused)
 {
 	struct vmbus_channel *chan = xchan;
 
-	if (VMBUS_CHAN_ISPRIMARY(chan)) {
-		/* Only primary channel owns the device */
-		vmbus_delete_child(chan);
-		/* NOTE: DO NOT free primary channel for now */
-	} else {
-		struct vmbus_channel *pri_chan = chan->ch_prichan;
+	KASSERT(VMBUS_CHAN_ISPRIMARY(chan),
+	    ("chan%u is not primary channel", chan->ch_id));
 
-		/* Release this channel (back to vmbus). */
-		vmbus_chan_release(chan);
+	/* Only primary channel owns the device */
+	vmbus_delete_child(chan);
+	/* NOTE: DO NOT free primary channel for now */
+}
 
-		/* Unlink from its primary channel's sub-channel list. */
-		mtx_lock(&pri_chan->ch_subchan_lock);
-		TAILQ_REMOVE(&pri_chan->ch_subchans, chan, ch_sublink);
-		KASSERT(pri_chan->ch_subchan_cnt > 0,
-		    ("invalid subchan_cnt %d", pri_chan->ch_subchan_cnt));
-		pri_chan->ch_subchan_cnt--;
-		mtx_unlock(&pri_chan->ch_subchan_lock);
-		wakeup(pri_chan);
+static void
+vmbus_subchan_detach_task(void *xchan, int pending __unused)
+{
+	struct vmbus_channel *chan = xchan;
+	struct vmbus_channel *pri_chan = chan->ch_prichan;
 
-		/* Free this channel's resource. */
-		vmbus_chan_free(chan);
-	}
+	KASSERT(!VMBUS_CHAN_ISPRIMARY(chan),
+	    ("chan%u is primary channel", chan->ch_id));
+
+	/* Release this channel (back to vmbus). */
+	vmbus_chan_release(chan);
+
+	/* Unlink from its primary channel's sub-channel list. */
+	mtx_lock(&pri_chan->ch_subchan_lock);
+	TAILQ_REMOVE(&pri_chan->ch_subchans, chan, ch_sublink);
+	KASSERT(pri_chan->ch_subchan_cnt > 0,
+	    ("invalid subchan_cnt %d", pri_chan->ch_subchan_cnt));
+	pri_chan->ch_subchan_cnt--;
+	mtx_unlock(&pri_chan->ch_subchan_lock);
+	wakeup(pri_chan);
+
+	/* Free this channel's resource. */
+	vmbus_chan_free(chan);
 }
 
 /*

@@ -501,6 +501,15 @@ vmbus_scan(struct vmbus_softc *sc)
 	TASK_INIT(&sc->vmbus_devtask, 0, vmbus_device_task, sc);
 
 	/*
+	 * This taskqueue handles sub-channel detach, so that vmbus
+	 * device's detach running in vmbus_devtq can drain its sub-
+	 * channels.
+	 */
+	sc->vmbus_subchtq = taskqueue_create("vmbus subch", M_WAITOK,
+	    taskqueue_thread_enqueue, &sc->vmbus_subchtq);
+	taskqueue_start_threads(&sc->vmbus_subchtq, 1, PI_NET, "vmbussch");
+
+	/*
 	 * Start waiting for the initial channel offers in vmbus devtq.
 	 */
 	TASK_INIT(&scan_task, 0, vmbus_scan_task, sc);

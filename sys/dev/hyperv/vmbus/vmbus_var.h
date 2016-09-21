@@ -111,8 +111,9 @@ struct vmbus_softc {
 #define VMBUS_SCAN_CHCNT_DONE	0x80000000
 	uint32_t		vmbus_scan_devcnt;
 
-	struct task		vmbus_devtask;	/* for channel attach */
-	struct taskqueue	*vmbus_devtq;	/* for channel attach/detach */
+	struct task		vmbus_devtask;	/* for dev attach */
+	struct taskqueue	*vmbus_devtq;	/* for dev attach/detach */
+	struct taskqueue	*vmbus_subchtq;	/* for sub-chan detach */
 
 	/* Primary channels */
 	struct mtx		vmbus_prichan_lock;
