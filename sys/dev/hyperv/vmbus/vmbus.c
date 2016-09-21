@@ -395,28 +395,29 @@ vmbus_req_channels(struct vmbus_softc *sc)
 static void
 vmbus_scan_newchan(struct vmbus_softc *sc)
 {
-	mtx_lock(&sc->vmbus_scan_lock);
+
+	GIANT_REQUIRED;
 	if ((sc->vmbus_scan_chcnt & VMBUS_SCAN_CHCNT_DONE) == 0)
 		sc->vmbus_scan_chcnt++;
-	mtx_unlock(&sc->vmbus_scan_lock);
 }
 
 static void
 vmbus_scan_done(struct vmbus_softc *sc,
     const struct vmbus_message *msg __unused)
 {
-	mtx_lock(&sc->vmbus_scan_lock);
+
+	mtx_lock(&Giant);
 	sc->vmbus_scan_chcnt |= VMBUS_SCAN_CHCNT_DONE;
-	mtx_unlock(&sc->vmbus_scan_lock);
+	mtx_unlock(&Giant);
 	wakeup(&sc->vmbus_scan_chcnt);
 }
 
 static void
 vmbus_scan_newdev(struct vmbus_softc *sc)
 {
-	mtx_lock(&sc->vmbus_scan_lock);
+
+	GIANT_REQUIRED;
 	sc->vmbus_scan_devcnt++;
-	mtx_unlock(&sc->vmbus_scan_lock);
 	wakeup(&sc->vmbus_scan_devcnt);
 }
 
@@ -425,18 +426,17 @@ vmbus_scan_wait(struct vmbus_softc *sc)
 {
 	uint32_t chancnt;
 
-	mtx_lock(&sc->vmbus_scan_lock);
+	GIANT_REQUIRED;
 	while ((sc->vmbus_scan_chcnt & VMBUS_SCAN_CHCNT_DONE) == 0) {
-		mtx_sleep(&sc->vmbus_scan_chcnt, &sc->vmbus_scan_lock, 0,
+		mtx_sleep(&sc->vmbus_scan_chcnt, &Giant, 0,
 		    "waitch", 0);
 	}
 	chancnt = sc->vmbus_scan_chcnt & ~VMBUS_SCAN_CHCNT_DONE;
 
 	while (sc->vmbus_scan_devcnt != chancnt) {
-		mtx_sleep(&sc->vmbus_scan_devcnt, &sc->vmbus_scan_lock, 0,
+		mtx_sleep(&sc->vmbus_scan_devcnt, &Giant, 0,
 		    "waitdev", 0);
 	}
-	mtx_unlock(&sc->vmbus_scan_lock);
 }
 
 static int
@@ -920,6 +920,8 @@ vmbus_add_child(struct vmbus_channel *chan)
 	device_t parent = sc->vmbus_dev;
 	int error = 0;
 
+	mtx_lock(&Giant);
+
 	/* New channel has been offered */
 	vmbus_scan_newchan(sc);
 
@@ -935,6 +937,8 @@ vmbus_add_child(struct vmbus_channel *chan)
 done:
 	/* New device has been/should be added to vmbus. */
 	vmbus_scan_newdev(sc);
+
+	mtx_lock(&Giant);
 	return error;
 }
 
@@ -1028,7 +1032,6 @@ vmbus_doattach(struct vmbus_softc *sc)
 		return (0);
 	sc->vmbus_flags |= VMBUS_FLAG_ATTACHED;
 
-	mtx_init(&sc->vmbus_scan_lock, "vmbus scan", NULL, MTX_DEF);
 	sc->vmbus_gpadl = VMBUS_GPADL_START;
 	mtx_init(&sc->vmbus_prichan_lock, "vmbus prichan", NULL, MTX_DEF);
 	TAILQ_INIT(&sc->vmbus_prichans);
@@ -1102,7 +1105,6 @@ cleanup:
 		sc->vmbus_xc = NULL;
 	}
 	free(sc->vmbus_chmap, M_DEVBUF);
-	mtx_destroy(&sc->vmbus_scan_lock);
 	mtx_destroy(&sc->vmbus_prichan_lock);
 
 	return (ret);
@@ -1164,7 +1166,6 @@ vmbus_detach(device_t dev)
 	}
 
 	free(sc->vmbus_chmap, M_DEVBUF);
-	mtx_destroy(&sc->vmbus_scan_lock);
 	mtx_destroy(&sc->vmbus_prichan_lock);
 
 	return (0);
