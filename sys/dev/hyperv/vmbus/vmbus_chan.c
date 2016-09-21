@@ -59,6 +59,7 @@ static struct vmbus_channel	*vmbus_chan_alloc(struct vmbus_softc *);
 static void			vmbus_chan_free(struct vmbus_channel *);
 static int			vmbus_chan_add(struct vmbus_channel *);
 static void			vmbus_chan_cpu_default(struct vmbus_channel *);
+static int			vmbus_chan_release(struct vmbus_channel *);
 
 static void			vmbus_chan_task(void *, int);
 static void			vmbus_chan_task_nobatch(void *, int);
@@ -1227,6 +1228,40 @@ vmbus_chan_msgproc_chrescind(struct vmbus_softc *sc,
 	taskqueue_enqueue(sc->vmbus_devtq, &chan->ch_detach_task);
 }
 
+static int
+vmbus_chan_release(struct vmbus_channel *chan)
+{
+	struct vmbus_softc *sc = chan->ch_vmbus;
+	struct vmbus_chanmsg_chfree *req;
+	struct vmbus_msghc *mh;
+	int error;
+
+	mh = vmbus_msghc_get(sc, sizeof(*req));
+	if (mh == NULL) {
+		device_printf(sc->vmbus_dev, "can not get msg hypercall for "
+		    "chfree(chan%u)\n", chan->ch_id);
+		return (ENXIO);
+	}
+
+	req = vmbus_msghc_dataptr(mh);
+	req->chm_hdr.chm_type = VMBUS_CHANMSG_TYPE_CHFREE;
+	req->chm_chanid = chan->ch_id;
+
+	error = vmbus_msghc_exec_noresult(mh);
+	vmbus_msghc_put(sc, mh);
+
+	if (error) {
+		device_printf(sc->vmbus_dev, "chfree(chan%u) failed: %d",
+		    chan->ch_id, error);
+	} else {
+		if (bootverbose) {
+			device_printf(sc->vmbus_dev, "chan%u freed\n",
+			    chan->ch_id);
+		}
+	}
+	return (error);
+}
+
 static void
 vmbus_chan_detach_task(void *xchan, int pending __unused)
 {
@@ -1237,39 +1272,12 @@ vmbus_chan_detach_task(void *xchan, int pending __unused)
 		vmbus_delete_child(chan);
 		/* NOTE: DO NOT free primary channel for now */
 	} else {
-		struct vmbus_softc *sc = chan->ch_vmbus;
 		struct vmbus_channel *pri_chan = chan->ch_prichan;
-		struct vmbus_chanmsg_chfree *req;
-		struct vmbus_msghc *mh;
-		int error;
 
-		mh = vmbus_msghc_get(sc, sizeof(*req));
-		if (mh == NULL) {
-			device_printf(sc->vmbus_dev,
-			    "can not get msg hypercall for chfree(chan%u)\n",
-			    chan->ch_id);
-			goto remove;
-		}
+		/* Release this channel (back to vmbus). */
+		vmbus_chan_release(chan);
 
-		req = vmbus_msghc_dataptr(mh);
-		req->chm_hdr.chm_type = VMBUS_CHANMSG_TYPE_CHFREE;
-		req->chm_chanid = chan->ch_id;
-
-		error = vmbus_msghc_exec_noresult(mh);
-		vmbus_msghc_put(sc, mh);
-
-		if (error) {
-			device_printf(sc->vmbus_dev,
-			    "chfree(chan%u) failed: %d",
-			    chan->ch_id, error);
-			/* NOTE: Move on! */
-		} else {
-			if (bootverbose) {
-				device_printf(sc->vmbus_dev, "chan%u freed\n",
-				    chan->ch_id);
-			}
-		}
-remove:
+		/* Unlink from its primary channel's sub-channel list. */
 		mtx_lock(&pri_chan->ch_subchan_lock);
 		TAILQ_REMOVE(&pri_chan->ch_subchans, chan, ch_sublink);
 		KASSERT(pri_chan->ch_subchan_cnt > 0,
@@ -1278,6 +1286,7 @@ remove:
 		mtx_unlock(&pri_chan->ch_subchan_lock);
 		wakeup(pri_chan);
 
+		/* Free this channel's resource. */
 		vmbus_chan_free(chan);
 	}
 }
