@@ -88,6 +88,9 @@ static void			vmbus_scan_newchan(struct vmbus_softc *);
 static void			vmbus_scan_newdev(struct vmbus_softc *);
 static void			vmbus_scan_done(struct vmbus_softc *,
 				    const struct vmbus_message *);
+static void			vmbus_scan_done_locked(struct vmbus_softc *);
+static void			vmbus_scan_task(void *xsc, int pending);
+static void			vmbus_device_task(void *xsc, int pending);
 static void			vmbus_chanmsg_handle(struct vmbus_softc *,
 				    const struct vmbus_message *);
 static void			vmbus_msg_task(void *, int);
@@ -402,14 +405,22 @@ vmbus_scan_newchan(struct vmbus_softc *sc)
 }
 
 static void
+vmbus_scan_done_locked(struct vmbus_softc *sc)
+{
+
+	GIANT_REQUIRED;
+	sc->vmbus_scan_chcnt |= VMBUS_SCAN_CHCNT_DONE;
+	wakeup(&sc->vmbus_scan_chcnt);
+}
+
+static void
 vmbus_scan_done(struct vmbus_softc *sc,
     const struct vmbus_message *msg __unused)
 {
 
 	mtx_lock(&Giant);
-	sc->vmbus_scan_chcnt |= VMBUS_SCAN_CHCNT_DONE;
+	vmbus_scan_done_locked(sc);
 	mtx_unlock(&Giant);
-	wakeup(&sc->vmbus_scan_chcnt);
 }
 
 static void
@@ -419,6 +430,7 @@ vmbus_scan_newdev(struct vmbus_softc *sc)
 	GIANT_REQUIRED;
 	sc->vmbus_scan_devcnt++;
 	wakeup(&sc->vmbus_scan_devcnt);
+	taskqueue_enqueue(sc->vmbus_devtq, &sc->vmbus_devtask);
 }
 
 static void
@@ -433,29 +445,21 @@ vmbus_scan_wait(struct vmbus_softc *sc)
 	}
 	chancnt = sc->vmbus_scan_chcnt & ~VMBUS_SCAN_CHCNT_DONE;
 
-	while (sc->vmbus_scan_devcnt != chancnt) {
+	while (sc->vmbus_scan_devcnt < chancnt) {
 		mtx_sleep(&sc->vmbus_scan_devcnt, &Giant, 0,
 		    "waitdev", 0);
 	}
 }
 
-static int
-vmbus_scan(struct vmbus_softc *sc)
+static void
+vmbus_scan_task(void *xsc, int pending __unused)
 {
-	int error;
+	struct vmbus_softc *sc = xsc;
+
+	mtx_lock(&Giant);
 
 	/*
-	 * Start vmbus scanning.
-	 */
-	error = vmbus_req_channels(sc);
-	if (error) {
-		device_printf(sc->vmbus_dev, "channel request failed: %d\n",
-		    error);
-		return error;
-	}
-
-	/*
-	 * Wait for all devices are added to vmbus.
+	 * Wait for all devices to be added to vmbus.
 	 */
 	vmbus_scan_wait(sc);
 
@@ -465,11 +469,76 @@ vmbus_scan(struct vmbus_softc *sc)
 	bus_generic_probe(sc->vmbus_dev);
 	bus_generic_attach(sc->vmbus_dev);
 
+	mtx_unlock(&Giant);
+}
+
+static void
+vmbus_device_task(void *xsc, int pending __unused)
+{
+	struct vmbus_softc *sc = xsc;
+
+	/*
+	 * Probe and attach.
+	 */
+	mtx_lock(&Giant);
+	bus_generic_attach(sc->vmbus_dev);
+	mtx_unlock(&Giant);
+}
+
+static int
+vmbus_scan(struct vmbus_softc *sc)
+{
+	struct task scan_task;
+	int error;
+
+	/*
+	 * This taskqueue serializes vmbus devices' attach and detach
+	 * for channel offer and rescind messages.
+	 */
+	sc->vmbus_devtq = taskqueue_create("vmbus dev", M_WAITOK,
+	    taskqueue_thread_enqueue, &sc->vmbus_devtq);
+	taskqueue_start_threads(&sc->vmbus_devtq, 1, PI_NET, "vmbusdev");
+	TASK_INIT(&sc->vmbus_devtask, 0, vmbus_device_task, sc);
+
+	/*
+	 * Start waiting for the initial channel offers in vmbus devtq.
+	 */
+	TASK_INIT(&scan_task, 0, vmbus_scan_task, sc);
+	taskqueue_enqueue(sc->vmbus_devtq, &scan_task);
+
+	/*
+	 * Start vmbus scanning.
+	 */
+	error = vmbus_req_channels(sc);
+	if (error) {
+		device_printf(sc->vmbus_dev, "channel request failed: %d\n",
+		    error);
+		/*
+		 * Fake the scan done event, which will never come
+		 * if the vmbus scan fails to start.
+		 */
+		vmbus_scan_done_locked(sc);
+		/* Move on; bail out after the scan_task is drained. */
+	}
+
+	/*
+	 * Wait for all vmbus devices to be attached.
+	 */
+	GIANT_REQUIRED;
+	mtx_unlock(&Giant);
+	taskqueue_drain(sc->vmbus_devtq, &scan_task);
+	mtx_lock(&Giant);
+
+	if (error) {
+		/* Failed to start vmbus scan. */
+		return (error);
+	}
+
 	if (bootverbose) {
 		device_printf(sc->vmbus_dev, "device scan, probe and attach "
 		    "done\n");
 	}
-	return 0;
+	return (0);
 }
 
 static void
