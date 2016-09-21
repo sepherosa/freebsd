@@ -1224,7 +1224,7 @@ vmbus_chan_msgproc_chrescind(struct vmbus_softc *sc,
 		return;
 	sc->vmbus_chmap[note->chm_chanid] = NULL;
 
-	taskqueue_enqueue(taskqueue_thread, &chan->ch_detach_task);
+	taskqueue_enqueue(sc->vmbus_devtq, &chan->ch_detach_task);
 }
 
 static void
