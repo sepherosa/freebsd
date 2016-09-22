@@ -116,6 +116,10 @@ struct vmbus_softc {
 	/* Primary channels */
 	struct mtx		vmbus_prichan_lock;
 	TAILQ_HEAD(, vmbus_channel) vmbus_prichans;
+
+	/* Complete channel list */
+	struct mtx		vmbus_chan_lock;
+	TAILQ_HEAD(, vmbus_channel) vmbus_chans;
 };
 
 #define VMBUS_FLAG_ATTACHED	0x0001	/* vmbus was attached */

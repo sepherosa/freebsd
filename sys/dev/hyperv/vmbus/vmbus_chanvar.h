@@ -128,7 +128,10 @@ struct vmbus_channel {
 	struct task			ch_detach_task;	/* run in ch_mgmt_tq */
 	struct taskqueue		*ch_mgmt_tq;
 
+	/* If this is a primary channel */
 	TAILQ_ENTRY(vmbus_channel)	ch_prilink;	/* primary chan link */
+
+	TAILQ_ENTRY(vmbus_channel)	ch_link;	/* channel link */
 	uint32_t			ch_subidx;	/* subchan index */
 	volatile uint32_t		ch_stflags;	/* atomic-op */
 							/* VMBUS_CHAN_ST_ */

@@ -1011,6 +1011,8 @@ vmbus_doattach(struct vmbus_softc *sc)
 	sc->vmbus_gpadl = VMBUS_GPADL_START;
 	mtx_init(&sc->vmbus_prichan_lock, "vmbus prichan", NULL, MTX_DEF);
 	TAILQ_INIT(&sc->vmbus_prichans);
+	mtx_init(&sc->vmbus_chan_lock, "vmbus channel", NULL, MTX_DEF);
+	TAILQ_INIT(&sc->vmbus_chans);
 	sc->vmbus_chmap = malloc(
 	    sizeof(struct vmbus_channel *) * VMBUS_CHAN_MAX, M_DEVBUF,
 	    M_WAITOK | M_ZERO);
