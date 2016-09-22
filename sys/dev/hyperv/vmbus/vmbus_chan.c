@@ -161,7 +161,7 @@ vmbus_chan_rem_sublist(struct vmbus_channel *prichan,
 
 	mtx_assert(&prichan->ch_subchan_lock, MA_OWNED);
 
-	KASSERT(pri_chan->ch_subchan_cnt > 0,
+	KASSERT(prichan->ch_subchan_cnt > 0,
 	    ("invalid subchan_cnt %d", prichan->ch_subchan_cnt));
 	prichan->ch_subchan_cnt--;
 
@@ -1113,13 +1113,13 @@ static void
 vmbus_chan_free(struct vmbus_channel *chan)
 {
 
-	KASSERT(TAILQ_EMPTY(&chan->ch_subchan) && chan->ch_subchan_cnt == 0,
+	KASSERT(TAILQ_EMPTY(&chan->ch_subchans) && chan->ch_subchan_cnt == 0,
 	    ("still owns sub-channels"));
-	KASSERT(chan->ch_stflags &
+	KASSERT((chan->ch_stflags &
 	    (VMBUS_CHAN_ST_OPENED |
 	     VMBUS_CHAN_ST_ONPRIL |
 	     VMBUS_CHAN_ST_ONSUBL |
-	     VMBUS_CHAN_ST_ONLIST) == 0, ("free busy channel"));
+	     VMBUS_CHAN_ST_ONLIST)) == 0, ("free busy channel"));
 	hyperv_dmamem_free(&chan->ch_monprm_dma, chan->ch_monprm);
 	mtx_destroy(&chan->ch_subchan_lock);
 	vmbus_rxbr_deinit(&chan->ch_rxbr);
