@@ -62,7 +62,6 @@ static void			vmbus_chan_cpu_default(struct vmbus_channel *);
 static int			vmbus_chan_release(struct vmbus_channel *);
 static void			vmbus_chan_set_chmap(struct vmbus_channel *);
 static void			vmbus_chan_clear_chmap(struct vmbus_channel *);
-static void			vmbus_prichan_detach(struct vmbus_channel *);
 
 static void			vmbus_chan_task(void *, int);
 static void			vmbus_chan_task_nobatch(void *, int);
@@ -1342,8 +1341,10 @@ vmbus_chan_release(struct vmbus_channel *chan)
 }
 
 static void
-vmbus_prichan_detach(struct vmbus_channel *chan)
+vmbus_prichan_detach_task(void *xchan, int pending __unused)
 {
+	struct vmbus_channel *chan = xchan;
+
 	KASSERT(VMBUS_CHAN_ISPRIMARY(chan),
 	    ("chan%u is not primary channel", chan->ch_id));
 
@@ -1355,13 +1356,6 @@ vmbus_prichan_detach(struct vmbus_channel *chan)
 
 	/* Free this channel's resource. */
 	vmbus_chan_free(chan);
-}
-
-static void
-vmbus_prichan_detach_task(void *xchan, int pending __unused)
-{
-
-	vmbus_prichan_detach(xchan);
 }
 
 static void
@@ -1406,35 +1400,36 @@ vmbus_subchan_attach_task(void *xchan __unused, int pending __unused)
 	/* Nothing */
 }
 
-/*
- * Detach all devices and destroy the corresponding primary channels.
- *
- * XXX kinda broken, need rework.
- */
 void
 vmbus_chan_destroy_all(struct vmbus_softc *sc)
 {
-	struct vmbus_channel *chan;
 
-	mtx_lock(&sc->vmbus_prichan_lock);
-	while ((chan = TAILQ_FIRST(&sc->vmbus_prichans)) != NULL) {
-		KASSERT(VMBUS_CHAN_ISPRIMARY(chan), ("not primary channel"));
-		TAILQ_REMOVE(&sc->vmbus_prichans, chan, ch_prilink);
-		mtx_unlock(&sc->vmbus_prichan_lock);
+	/*
+	 * Detach all devices and destroy the corresponding primary
+	 * channels.
+	 */
+	for (;;) {
+		struct vmbus_channel *chan;
 
-		/* Remove this primary from the channel list. */
 		mtx_lock(&sc->vmbus_chan_lock);
+		TAILQ_FOREACH(chan, &sc->vmbus_chans, ch_link) {
+			if (VMBUS_CHAN_ISPRIMARY(chan))
+				break;
+		}
+		if (chan == NULL) {
+			/* No more primary channels; done. */
+			mtx_unlock(&sc->vmbus_chan_lock);
+			break;
+		}
 		TAILQ_REMOVE(&sc->vmbus_chans, chan, ch_link);
 		mtx_unlock(&sc->vmbus_chan_lock);
 
-		/* Detach this primary channel. */
-		vmbus_prichan_detach(chan);
-
 		mtx_lock(&sc->vmbus_prichan_lock);
+		TAILQ_REMOVE(&sc->vmbus_prichans, chan, ch_prilink);
+		mtx_unlock(&sc->vmbus_prichan_lock);
+
+		taskqueue_enqueue(chan->ch_mgmt_tq, &chan->ch_detach_task);
 	}
-	bzero(sc->vmbus_chmap,
-	    sizeof(struct vmbus_channel *) * VMBUS_CHAN_MAX);
-	mtx_unlock(&sc->vmbus_prichan_lock);
 }
 
 /*
