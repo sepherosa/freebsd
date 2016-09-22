@@ -1086,7 +1086,7 @@ done:
 	 * Hook this channel up for later rescind.
 	 */
 	mtx_lock(&sc->vmbus_chan_lock);
-	TAILQ_INSERT_TAIL(&sc->vmbus_chans, chan, ch_link);
+	TAILQ_INSERT_TAIL(&sc->vmbus_chans, newchan, ch_link);
 	mtx_unlock(&sc->vmbus_chan_lock);
 	return 0;
 }
@@ -1263,7 +1263,7 @@ vmbus_chan_msgproc_chrescind(struct vmbus_softc *sc,
 		 * this thread.
 		 */
 		mtx_lock(&sc->vmbus_prichan_lock);
-		TAILQ_REMOVE(&sc->vmbus_prichan, chan, ch_prilink);
+		TAILQ_REMOVE(&sc->vmbus_prichans, chan, ch_prilink);
 		mtx_unlock(&sc->vmbus_prichan_lock);
 	}
 
