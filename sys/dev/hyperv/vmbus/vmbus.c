@@ -83,6 +83,7 @@ static int			vmbus_connect(struct vmbus_softc *, uint32_t);
 static int			vmbus_req_channels(struct vmbus_softc *sc);
 static void			vmbus_disconnect(struct vmbus_softc *);
 static int			vmbus_scan(struct vmbus_softc *);
+static void			vmbus_scan_teardown(struct vmbus_softc *);
 static void			vmbus_scan_done(struct vmbus_softc *,
 				    const struct vmbus_message *);
 static void			vmbus_chanmsg_handle(struct vmbus_softc *,
@@ -460,6 +461,25 @@ vmbus_scan(struct vmbus_softc *sc)
 		    "done\n");
 	}
 	return (0);
+}
+
+static void
+vmbus_scan_teardown(struct vmbus_softc *sc)
+{
+
+	GIANT_REQUIRED;
+	if (sc->vmbus_devtq != NULL) {
+		mtx_unlock(&Giant);
+		taskqueue_free(sc->vmbus_devtq);
+		mtx_lock(&Giant);
+		sc->vmbus_devtq = NULL;
+	}
+	if (sc->vmbus_subchtq != NULL) {
+		mtx_unlock(&Giant);
+		taskqueue_free(sc->vmbus_subchtq);
+		mtx_lock(&Giant);
+		sc->vmbus_subchtq = NULL;
+	}
 }
 
 static void
@@ -1076,6 +1096,7 @@ vmbus_doattach(struct vmbus_softc *sc)
 	return (ret);
 
 cleanup:
+	vmbus_scan_teardown(sc);
 	vmbus_intr_teardown(sc);
 	vmbus_dma_free(sc);
 	if (sc->vmbus_xc != NULL) {
@@ -1084,6 +1105,7 @@ cleanup:
 	}
 	free(sc->vmbus_chmap, M_DEVBUF);
 	mtx_destroy(&sc->vmbus_prichan_lock);
+	mtx_destroy(&sc->vmbus_chan_lock);
 
 	return (ret);
 }
@@ -1126,7 +1148,10 @@ vmbus_detach(device_t dev)
 {
 	struct vmbus_softc *sc = device_get_softc(dev);
 
+	bus_generic_detach(dev);
 	vmbus_chan_destroy_all(sc);
+
+	vmbus_scan_teardown(sc);
 
 	vmbus_disconnect(sc);
 
@@ -1145,6 +1170,7 @@ vmbus_detach(device_t dev)
 
 	free(sc->vmbus_chmap, M_DEVBUF);
 	mtx_destroy(&sc->vmbus_prichan_lock);
+	mtx_destroy(&sc->vmbus_chan_lock);
 
 	return (0);
 }
