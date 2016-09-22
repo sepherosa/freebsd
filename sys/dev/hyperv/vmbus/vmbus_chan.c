@@ -60,10 +60,13 @@ static void			vmbus_chan_free(struct vmbus_channel *);
 static int			vmbus_chan_add(struct vmbus_channel *);
 static void			vmbus_chan_cpu_default(struct vmbus_channel *);
 static int			vmbus_chan_release(struct vmbus_channel *);
+static void			vmbus_chan_set_chmap(struct vmbus_channel *);
+static void			vmbus_chan_clear_chmap(struct vmbus_channel *);
 static void			vmbus_prichan_detach(struct vmbus_channel *);
 
 static void			vmbus_chan_task(void *, int);
 static void			vmbus_chan_task_nobatch(void *, int);
+static void			vmbus_chan_clrchmap_task(void *, int);
 static void			vmbus_prichan_attach_task(void *, int);
 static void			vmbus_subchan_attach_task(void *, int);
 static void			vmbus_prichan_detach_task(void *, int);
@@ -240,6 +243,7 @@ vmbus_chan_open_br(struct vmbus_channel *chan, const struct vmbus_chan_br *cbr,
 	struct vmbus_msghc *mh;
 	uint32_t status;
 	int error, txbr_size, rxbr_size;
+	task_fn_t *task_fn;
 	uint8_t *br;
 
 	if (udlen > VMBUS_CHANMSG_CHOPEN_UDATA_SIZE) {
@@ -274,9 +278,10 @@ vmbus_chan_open_br(struct vmbus_channel *chan, const struct vmbus_chan_br *cbr,
 
 	chan->ch_tq = VMBUS_PCPU_GET(chan->ch_vmbus, event_tq, chan->ch_cpuid);
 	if (chan->ch_flags & VMBUS_CHAN_FLAG_BATCHREAD)
-		TASK_INIT(&chan->ch_task, 0, vmbus_chan_task, chan);
+		task_fn = vmbus_chan_task;
 	else
-		TASK_INIT(&chan->ch_task, 0, vmbus_chan_task_nobatch, chan);
+		task_fn = vmbus_chan_task_nobatch;
+	TASK_INIT(&chan->ch_task, 0, task_fn, chan);
 
 	/* TX bufring comes first */
 	vmbus_txbr_setup(&chan->ch_txbr, br, txbr_size);
@@ -296,6 +301,12 @@ vmbus_chan_open_br(struct vmbus_channel *chan, const struct vmbus_chan_br *cbr,
 		    "failed to connect bufring GPADL to chan%u\n", chan->ch_id);
 		goto failed;
 	}
+
+	/*
+	 * Install this channel, before it is opened, but after everything
+	 * else has been setup.
+	 */
+	vmbus_chan_set_chmap(chan);
 
 	/*
 	 * Open channel w/ the bufring GPADL on the target CPU.
@@ -346,6 +357,7 @@ vmbus_chan_open_br(struct vmbus_channel *chan, const struct vmbus_chan_br *cbr,
 	error = ENXIO;
 
 failed:
+	vmbus_chan_clear_chmap(chan);
 	if (chan->ch_bufring_gpadl) {
 		vmbus_chan_gpadl_disconnect(chan, chan->ch_bufring_gpadl);
 		chan->ch_bufring_gpadl = 0;
@@ -522,12 +534,38 @@ vmbus_chan_gpadl_disconnect(struct vmbus_channel *chan, uint32_t gpadl)
 }
 
 static void
+vmbus_chan_clrchmap_task(void *xchan, int pending __unused)
+{
+	struct vmbus_channel *chan = xchan;
+
+	critical_enter();
+	chan->ch_vmbus->vmbus_chmap[chan->ch_id] = NULL;
+	critical_exit();
+}
+
+static void
+vmbus_chan_clear_chmap(struct vmbus_channel *chan)
+{
+	struct task chmap_task;
+
+	TASK_INIT(&chmap_task, 0, vmbus_chan_clrchmap_task, chan);
+	taskqueue_enqueue(chan->ch_tq, &chmap_task);
+	taskqueue_drain(chan->ch_tq, &chmap_task);
+}
+
+static void
+vmbus_chan_set_chmap(struct vmbus_channel *chan)
+{
+	__compiler_membar();
+	chan->ch_vmbus->vmbus_chmap[chan->ch_id] = chan;
+}
+
+static void
 vmbus_chan_close_internal(struct vmbus_channel *chan)
 {
 	struct vmbus_softc *sc = chan->ch_vmbus;
 	struct vmbus_msghc *mh;
 	struct vmbus_chanmsg_chclose *req;
-	struct taskqueue *tq = chan->ch_tq;
 	int error;
 
 	/* TODO: stringent check */
@@ -540,12 +578,14 @@ vmbus_chan_close_internal(struct vmbus_channel *chan)
 	sysctl_ctx_free(&chan->ch_sysctl_ctx);
 
 	/*
-	 * Set ch_tq to NULL to avoid more requests be scheduled.
-	 * XXX pretty broken; need rework.
+	 * NOTE:
+	 * Order is critical.  This channel _must_ be uninstalled first,
+	 * else the channel task may be enqueued by the IDT after it has
+	 * been drained.
 	 */
+	vmbus_chan_clear_chmap(chan);
+	taskqueue_drain(chan->ch_tq, &chan->ch_task);
 	chan->ch_tq = NULL;
-	taskqueue_drain(tq, &chan->ch_task);
-	chan->ch_cb = NULL;
 
 	/*
 	 * Close this channel.
@@ -889,10 +929,11 @@ vmbus_event_flags_proc(struct vmbus_softc *sc, volatile u_long *event_flags,
 			flags &= ~(1UL << chid_ofs);
 
 			chan = sc->vmbus_chmap[chid_base + chid_ofs];
-
-			/* if channel is closed or closing */
-			if (chan == NULL || chan->ch_tq == NULL)
+			if (__predict_false(chan == NULL)) {
+				/* Channel is closed. */
 				continue;
+			}
+			__compiler_membar();
 
 			if (chan->ch_flags & VMBUS_CHAN_FLAG_BATCHREAD)
 				vmbus_rxbr_intr_mask(&chan->ch_rxbr);
@@ -1012,8 +1053,6 @@ vmbus_chan_add(struct vmbus_channel *newchan)
 		    newchan->ch_id);
 		return EINVAL;
 	}
-	/* XXX */
-	sc->vmbus_chmap[newchan->ch_id] = newchan;
 
 	if (bootverbose) {
 		device_printf(sc->vmbus_dev, "chan%u subidx%u offer\n",
@@ -1233,9 +1272,6 @@ vmbus_chan_msgproc_chrescind(struct vmbus_softc *sc,
 		device_printf(sc->vmbus_dev, "chan%u rescinded\n",
 		    note->chm_chanid);
 	}
-
-	/* XXX */
-	sc->vmbus_chmap[note->chm_chanid] = NULL;
 
 	/*
 	 * Find and remove the target channel from the channel list.
