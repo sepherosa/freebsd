@@ -188,7 +188,7 @@ vmbus_chan_rem_list(struct vmbus_softc *sc, struct vmbus_channel *chan)
 
 	mtx_assert(&sc->vmbus_chan_lock, MA_OWNED);
 	if (atomic_testandclear_int(&chan->ch_stflags,
-	    VMBUS_CHAN_ST_ONLIST_SHIFT))
+	    VMBUS_CHAN_ST_ONLIST_SHIFT) == 0)
 		panic("channel is not on the list");
 	TAILQ_REMOVE(&sc->vmbus_chans, chan, ch_link);
 }
