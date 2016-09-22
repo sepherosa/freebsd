@@ -124,7 +124,10 @@ struct vmbus_channel {
 	struct hyperv_dma		ch_bufring_dma;
 	uint32_t			ch_bufring_gpadl;
 
-	struct task			ch_detach_task;
+	struct task			ch_attach_task;	/* run in ch_mgmt_tq */
+	struct task			ch_detach_task;	/* run in ch_mgmt_tq */
+	struct taskqueue		*ch_mgmt_tq;
+
 	TAILQ_ENTRY(vmbus_channel)	ch_prilink;	/* primary chan link */
 	uint32_t			ch_subidx;	/* subchan index */
 	volatile uint32_t		ch_stflags;	/* atomic-op */

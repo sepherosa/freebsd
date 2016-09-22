@@ -63,6 +63,8 @@ static int			vmbus_chan_release(struct vmbus_channel *);
 
 static void			vmbus_chan_task(void *, int);
 static void			vmbus_chan_task_nobatch(void *, int);
+static void			vmbus_prichan_attach_task(void *, int);
+static void			vmbus_subchan_attach_task(void *, int);
 static void			vmbus_prichan_detach_task(void *, int);
 static void			vmbus_subchan_detach_task(void *, int);
 
@@ -1127,7 +1129,7 @@ vmbus_chan_msgproc_choffer(struct vmbus_softc *sc,
 {
 	const struct vmbus_chanmsg_choffer *offer;
 	struct vmbus_channel *chan;
-	task_fn_t *detach_fn;
+	task_fn_t *detach_fn, *attach_fn;
 	int error;
 
 	offer = (const struct vmbus_chanmsg_choffer *)msg->msg_data;
@@ -1177,12 +1179,18 @@ vmbus_chan_msgproc_choffer(struct vmbus_softc *sc,
 	chan->ch_evtflag_mask = 1UL << (chan->ch_id & VMBUS_EVTFLAG_MASK);
 
 	/*
-	 * Setup detach task.
+	 * Setup attach and detach tasks.
 	 */
-	if (VMBUS_CHAN_ISPRIMARY(chan))
+	if (VMBUS_CHAN_ISPRIMARY(chan)) {
+		chan->ch_mgmt_tq = sc->vmbus_devtq;
+		attach_fn = vmbus_prichan_attach_task;
 		detach_fn = vmbus_prichan_detach_task;
-	else
+	} else {
+		chan->ch_mgmt_tq = sc->vmbus_subchtq;
+		attach_fn = vmbus_subchan_attach_task;
 		detach_fn = vmbus_subchan_detach_task;
+	}
+	TASK_INIT(&chan->ch_attach_task, 0, attach_fn, chan);
 	TASK_INIT(&chan->ch_detach_task, 0, detach_fn, chan);
 
 	/* Select default cpu for this channel. */
@@ -1195,17 +1203,7 @@ vmbus_chan_msgproc_choffer(struct vmbus_softc *sc,
 		vmbus_chan_free(chan);
 		return;
 	}
-
-	if (VMBUS_CHAN_ISPRIMARY(chan)) {
-		/*
-		 * Add device for this primary channel.
-		 *
-		 * NOTE:
-		 * Error is ignored here; don't have much to do if error
-		 * really happens.
-		 */
-		vmbus_add_child(chan);
-	}
+	taskqueue_enqueue(chan->ch_mgmt_tq, &chan->ch_attach_task);
 }
 
 /*
@@ -1217,7 +1215,6 @@ vmbus_chan_msgproc_chrescind(struct vmbus_softc *sc,
 {
 	const struct vmbus_chanmsg_chrescind *note;
 	struct vmbus_channel *chan;
-	struct taskqueue *tq;
 
 	note = (const struct vmbus_chanmsg_chrescind *)msg->msg_data;
 	if (note->chm_chanid > VMBUS_CHAN_MAX) {
@@ -1236,11 +1233,7 @@ vmbus_chan_msgproc_chrescind(struct vmbus_softc *sc,
 		return;
 	sc->vmbus_chmap[note->chm_chanid] = NULL;
 
-	if (VMBUS_CHAN_ISPRIMARY(chan))
-		tq = sc->vmbus_devtq;
-	else
-		tq = sc->vmbus_subchtq;
-	taskqueue_enqueue(tq, &chan->ch_detach_task);
+	taskqueue_enqueue(chan->ch_mgmt_tq, &chan->ch_detach_task);
 }
 
 static int
@@ -1313,6 +1306,23 @@ vmbus_subchan_detach_task(void *xchan, int pending __unused)
 
 	/* Free this channel's resource. */
 	vmbus_chan_free(chan);
+}
+
+static void
+vmbus_prichan_attach_task(void *xchan, int pending __unused)
+{
+
+	/*
+	 * Add device for this primary channel.
+	 */
+	vmbus_add_child(xchan);
+}
+
+static void
+vmbus_subchan_attach_task(void *xchan __unused, int pending __unused)
+{
+
+	/* Nothing */
 }
 
 /*

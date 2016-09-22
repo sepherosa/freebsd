@@ -107,13 +107,11 @@ struct vmbus_softc {
 	struct hyperv_dma	vmbus_mnf1_dma;
 	struct hyperv_dma	vmbus_mnf2_dma;
 
-	uint32_t		vmbus_scan_chcnt;
-#define VMBUS_SCAN_CHCNT_DONE	0x80000000
-	uint32_t		vmbus_scan_devcnt;
+	bool			vmbus_scandone;
+	struct task		vmbus_scandone_task;
 
-	struct task		vmbus_devtask;	/* for dev attach */
 	struct taskqueue	*vmbus_devtq;	/* for dev attach/detach */
-	struct taskqueue	*vmbus_subchtq;	/* for sub-chan detach */
+	struct taskqueue	*vmbus_subchtq;	/* for sub-chan attach/detach */
 
 	/* Primary channels */
 	struct mtx		vmbus_prichan_lock;
