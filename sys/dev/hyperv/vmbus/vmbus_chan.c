@@ -1022,10 +1022,12 @@ vmbus_chan_alloc(struct vmbus_softc *sc)
 static void
 vmbus_chan_free(struct vmbus_channel *chan)
 {
+
+	/* TODO: assert no longer opened */
 	/* TODO: assert sub-channel list is empty */
-	/* TODO: asset no longer on the primary channel's sub-channel list */
-	/* TODO: asset no longer on the vmbus channel list */
-	/* TODO: asset no longer on the vmbus primary channel list */
+	/* TODO: assert no longer on the primary channel's sub-channel list */
+	/* TODO: assert no longer on the vmbus channel list */
+	/* TODO: assert no longer on the vmbus primary channel list */
 	hyperv_dmamem_free(&chan->ch_monprm_dma, chan->ch_monprm);
 	mtx_destroy(&chan->ch_subchan_lock);
 	vmbus_rxbr_deinit(&chan->ch_rxbr);
