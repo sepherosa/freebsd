@@ -1651,7 +1651,8 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			hn_set_lro_lenlim(sc, HN_LRO_LENLIM_MIN(ifp));
 #endif
 
-		hn_suspend(sc);
+		if (ifp->if_drv_flags & IFF_DRV_RUNNING)
+			hn_suspend(sc);
 
 		/* We must remove and add back the device to cause the new
 		 * MTU to take effect.  This includes tearing down, but not
@@ -1677,8 +1678,9 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if (sc->hn_tx_ring[0].hn_chim_size > sc->hn_chim_szmax)
 			hn_set_chim_size(sc, sc->hn_chim_szmax);
 
-		hn_init_locked(sc);
-		hn_resume(sc);
+		/* All done!  Resume now. */
+		if (ifp->if_drv_flags & IFF_DRV_RUNNING)
+			hn_resume(sc);
 
 		HN_UNLOCK(sc);
 		break;
@@ -3545,6 +3547,10 @@ hn_suspend(struct hn_softc *sc)
 	int i;
 
 	HN_LOCK_ASSERT(sc);
+
+	/*
+	 * Suspend TX.
+	 */
 	for (i = 0; i < sc->hn_tx_ring_inuse; ++i) {
 		struct hn_tx_ring *txr = &sc->hn_tx_ring[i];
 
@@ -3557,6 +3563,11 @@ hn_suspend(struct hn_softc *sc)
 		while (hn_tx_ring_pending(txr))
 			pause("hnwtx", 1 /* 1 tick */);
 	}
+
+	/*
+	 * Disable RX.
+	 */
+	hv_rf_on_close(sc);
 }
 
 static void
@@ -3566,6 +3577,11 @@ hn_resume(struct hn_softc *sc)
 	int i;
 
 	HN_LOCK_ASSERT(sc);
+
+	/*
+	 * Re-enable RX.
+	 */
+	hv_rf_on_open(sc);
 
 	/*
 	 * Make sure to clear suspend status on "all" TX rings,
@@ -3589,7 +3605,7 @@ hn_resume(struct hn_softc *sc)
 	}
 
 	/*
-	 * Kick start.
+	 * Kick start TX.
 	 */
 	for (i = 0; i < sc->hn_tx_ring_inuse; ++i) {
 		txr = &sc->hn_tx_ring[i];
