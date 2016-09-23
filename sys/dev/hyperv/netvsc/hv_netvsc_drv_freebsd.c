@@ -351,6 +351,7 @@ static int hn_synth_attach(struct hn_softc *, int);
 static bool hn_tx_ring_pending(struct hn_tx_ring *);
 static void hn_suspend(struct hn_softc *);
 static void hn_resume(struct hn_softc *);
+static void hn_tx_ring_qflush(struct hn_tx_ring *);
 
 static void hn_nvs_handle_notify(struct hn_softc *sc,
 		const struct vmbus_chanpkt_hdr *pkt);
@@ -3102,20 +3103,24 @@ do_sched:
 }
 
 static void
+hn_tx_ring_qflush(struct hn_tx_ring *txr)
+{
+	struct mbuf *m;
+
+	mtx_lock(&txr->hn_tx_lock);
+	while ((m = buf_ring_dequeue_sc(txr->hn_mbuf_br)) != NULL)
+		m_freem(m);
+	mtx_unlock(&txr->hn_tx_lock);
+}
+
+static void
 hn_xmit_qflush(struct ifnet *ifp)
 {
 	struct hn_softc *sc = ifp->if_softc;
 	int i;
 
-	for (i = 0; i < sc->hn_tx_ring_inuse; ++i) {
-		struct hn_tx_ring *txr = &sc->hn_tx_ring[i];
-		struct mbuf *m;
-
-		mtx_lock(&txr->hn_tx_lock);
-		while ((m = buf_ring_dequeue_sc(txr->hn_mbuf_br)) != NULL)
-			m_freem(m);
-		mtx_unlock(&txr->hn_tx_lock);
-	}
+	for (i = 0; i < sc->hn_tx_ring_inuse; ++i)
+		hn_tx_ring_qflush(&sc->hn_tx_ring[i]);
 	if_qflush(ifp);
 }
 
@@ -3572,6 +3577,15 @@ hn_resume(struct hn_softc *sc)
 		mtx_lock(&txr->hn_tx_lock);
 		txr->hn_suspended = 0;
 		mtx_unlock(&txr->hn_tx_lock);
+	}
+
+	if (!hn_use_if_start) {
+		/*
+		 * Flush unused drbrs, since hn_tx_ring_inuse may be
+		 * reduced.
+		 */
+		for (i = sc->hn_tx_ring_inuse; i < sc->hn_tx_ring_cnt; ++i)
+			hn_tx_ring_qflush(&sc->hn_tx_ring[i]);
 	}
 
 	/*
