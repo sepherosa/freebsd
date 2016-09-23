@@ -348,6 +348,7 @@ static void hn_detach_allchans(struct hn_softc *);
 static void hn_chan_callback(struct vmbus_channel *chan, void *xrxr);
 static void hn_set_ring_inuse(struct hn_softc *, int);
 static int hn_synth_attach(struct hn_softc *, int);
+static bool hn_tx_ring_pending(struct hn_tx_ring *);
 
 static void hn_nvs_handle_notify(struct hn_softc *sc,
 		const struct vmbus_chanpkt_hdr *pkt);
@@ -903,6 +904,23 @@ hn_txdesc_hold(struct hn_txdesc *txd)
 	/* 0->1 transition will never work */
 	KASSERT(txd->refs > 0, ("invalid refs %d", txd->refs));
 	atomic_add_int(&txd->refs, 1);
+}
+
+static bool
+hn_tx_ring_pending(struct hn_tx_ring *txr)
+{
+	bool pending = false;
+
+#ifndef HN_USE_TXDESC_BUFRING
+	mtx_lock_spin(&txr->hn_txlist_spin);
+	if (txr->hn_txdesc_avail != txr->hn_txdesc_cnt)
+		pending = true;
+	mtx_unlock_spin(&txr->hn_txlist_spin);
+#else
+	if (!buf_ring_full(txr->hn_txdesc_br))
+		pending = true;
+#endif
+	return (pending);
 }
 
 static __inline void
@@ -2693,6 +2711,9 @@ hn_create_tx_ring(struct hn_softc *sc, int id)
 #endif
 	}
 	txr->hn_txdesc_avail = txr->hn_txdesc_cnt;
+
+	if (!hn_tx_ring_pending(txr))
+		device_printf(dev, "TX ring%d no pending TX\n", id);
 
 	if (sc->hn_tx_sysctl_tree != NULL) {
 		struct sysctl_oid_list *child;
