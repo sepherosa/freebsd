@@ -349,6 +349,8 @@ static void hn_chan_callback(struct vmbus_channel *chan, void *xrxr);
 static void hn_set_ring_inuse(struct hn_softc *, int);
 static int hn_synth_attach(struct hn_softc *, int);
 static bool hn_tx_ring_pending(struct hn_tx_ring *);
+static void hn_suspend(struct hn_softc *);
+static void hn_resume(struct hn_softc *);
 
 static void hn_nvs_handle_notify(struct hn_softc *sc,
 		const struct vmbus_chanpkt_hdr *pkt);
@@ -1259,6 +1261,9 @@ hn_start_locked(struct hn_tx_ring *txr, int len)
 	KASSERT(txr == &sc->hn_tx_ring[0], ("not the first TX ring"));
 	mtx_assert(&txr->hn_tx_lock, MA_OWNED);
 
+	if (__predict_false(txr->hn_suspended))
+		return 0;
+
 	if ((ifp->if_drv_flags & (IFF_DRV_RUNNING | IFF_DRV_OACTIVE)) !=
 	    IFF_DRV_RUNNING)
 		return 0;
@@ -1645,6 +1650,8 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			hn_set_lro_lenlim(sc, HN_LRO_LENLIM_MIN(ifp));
 #endif
 
+		hn_suspend(sc);
+
 		/* We must remove and add back the device to cause the new
 		 * MTU to take effect.  This includes tearing down, but not
 		 * deleting the channel, then bringing it back up.
@@ -1670,6 +1677,7 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			hn_set_chim_size(sc, sc->hn_chim_szmax);
 
 		hn_init_locked(sc);
+		hn_resume(sc);
 
 		HN_UNLOCK(sc);
 		break;
@@ -3005,6 +3013,9 @@ hn_xmit(struct hn_tx_ring *txr, int len)
 	KASSERT(hn_use_if_start == 0,
 	    ("hn_xmit is called, when if_start is enabled"));
 
+	if (__predict_false(txr->hn_suspended))
+		return 0;
+
 	if ((ifp->if_drv_flags & IFF_DRV_RUNNING) == 0 || txr->hn_oactive)
 		return 0;
 
@@ -3520,6 +3531,59 @@ hn_set_ring_inuse(struct hn_softc *sc, int ring_cnt)
 	if (bootverbose) {
 		if_printf(sc->hn_ifp, "%d TX ring, %d RX ring\n",
 		    sc->hn_tx_ring_inuse, sc->hn_rx_ring_inuse);
+	}
+}
+
+static void
+hn_suspend(struct hn_softc *sc)
+{
+	int i;
+
+	HN_LOCK_ASSERT(sc);
+	for (i = 0; i < sc->hn_tx_ring_inuse; ++i) {
+		struct hn_tx_ring *txr = &sc->hn_tx_ring[i];
+
+		mtx_lock(&txr->hn_tx_lock);
+		txr->hn_suspended = 1;
+		mtx_unlock(&txr->hn_tx_lock);
+		/* No one is able send more packets now. */
+
+		/* Wait for all pending sends to finish. */
+		while (hn_tx_ring_pending(txr))
+			pause("hnwtx", 1 /* 1 tick */);
+	}
+}
+
+static void
+hn_resume(struct hn_softc *sc)
+{
+	struct hn_tx_ring *txr;
+	int i;
+
+	HN_LOCK_ASSERT(sc);
+
+	/*
+	 * Make sure to clear suspend status on "all" TX rings,
+	 * since hn_tx_ring_inuse can be changed after hn_suspend().
+	 */
+	for (i = 0; i < sc->hn_tx_ring_cnt; ++i) {
+		txr = &sc->hn_tx_ring[i];
+
+		mtx_lock(&txr->hn_tx_lock);
+		txr->hn_suspended = 0;
+		mtx_unlock(&txr->hn_tx_lock);
+	}
+
+	/*
+	 * Kick start.
+	 */
+	for (i = 0; i < sc->hn_tx_ring_inuse; ++i) {
+		txr = &sc->hn_tx_ring[i];
+		/*
+		 * Use txeof task, so that any pending oactive can be
+		 * cleared properly.
+		 */
+		taskqueue_enqueue(txr->hn_tx_taskq, &txr->hn_txeof_task);
 	}
 }
 
