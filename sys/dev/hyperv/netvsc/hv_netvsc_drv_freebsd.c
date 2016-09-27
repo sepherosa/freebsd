@@ -3542,9 +3542,19 @@ hn_set_ring_inuse(struct hn_softc *sc, int ring_cnt)
 }
 
 static void
+hn_rx_drain(struct vmbus_channel *chan)
+{
+
+	while (!vmbus_chan_rx_empty(chan) || !vmbus_chan_tx_empty(chan))
+		pause("waitch", 1);
+	vmbus_chan_intr_drain(chan);
+}
+
+static void
 hn_suspend(struct hn_softc *sc)
 {
-	int i;
+	struct vmbus_channel **subch = NULL;
+	int i, nsubch;
 
 	HN_LOCK_ASSERT(sc);
 
@@ -3568,6 +3578,25 @@ hn_suspend(struct hn_softc *sc)
 	 * Disable RX.
 	 */
 	hv_rf_on_close(sc);
+
+	/* Give RNDIS enough time to flush all pending data packets. */
+	pause("waitrx", (200 * hz) / 1000);
+
+	nsubch = sc->hn_rx_ring_inuse - 1;
+	if (nsubch > 0)
+		subch = vmbus_subchan_get(sc->hn_prichan, nsubch);
+
+	/*
+	 * Drain RX/TX bufrings and interrupts.
+	 */
+	if (subch != NULL) {
+		for (i = 0; i < nsubch; ++i)
+			hn_rx_drain(subch[i]);
+	}
+	hn_rx_drain(sc->hn_prichan);
+
+	if (subch != NULL)
+		vmbus_subchan_rel(subch, nsubch);
 }
 
 static void
