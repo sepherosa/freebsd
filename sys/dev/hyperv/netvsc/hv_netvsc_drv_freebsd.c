@@ -2723,9 +2723,6 @@ hn_create_tx_ring(struct hn_softc *sc, int id)
 	}
 	txr->hn_txdesc_avail = txr->hn_txdesc_cnt;
 
-	if (!hn_tx_ring_pending(txr))
-		device_printf(dev, "TX ring%d no pending TX\n", id);
-
 	if (sc->hn_tx_sysctl_tree != NULL) {
 		struct sysctl_oid_list *child;
 		struct sysctl_ctx_list *ctx;
