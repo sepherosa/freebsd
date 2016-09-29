@@ -411,9 +411,19 @@ ioapic_assign_cpu(struct intsrc *isrc, u_int apic_id)
 	u_int old_vector, new_vector;
 	u_int old_id;
 
-	/* Stick to the first cpu for all I/O APIC pins on Hyper-V. */
-	if (vm_guest == VM_GUEST_HV)
-		apic_id = 0;
+	/*
+	 * On Hyper-V:
+	 * - Stick to the first cpu for all I/O APIC pins.
+	 * - And don't allow destination cpu changes.
+	 */
+	if (vm_guest == VM_GUEST_HV) {
+		if (intpin->io_vector) {
+			return (EINVAL);
+		} else {
+			printf("stick pin %u to cpu0\n", intpin->io_intpin);
+			apic_id = 0;
+		}
+	}
 
 	/*
 	 * keep 1st core as the destination for NMI
