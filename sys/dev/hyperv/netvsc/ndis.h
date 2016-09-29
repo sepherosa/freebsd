@@ -59,6 +59,7 @@
 #define	NDIS_OBJTYPE_DEFAULT		0x80
 #define	NDIS_OBJTYPE_RSS_CAPS		0x88
 #define	NDIS_OBJTYPE_RSS_PARAMS		0x89
+#define	NDIS_OBJTYPE_OFFLOAD		0xa7
 
 struct ndis_object_hdr {
 	uint8_t			ndis_type;	/* NDIS_OBJTYPE_ */
@@ -203,6 +204,102 @@ struct ndis_rssprm_toeplitz {
 	/* Indirect table */
 	uint32_t			rss_ind[NDIS_HASH_INDCNT];
 };
+
+/*
+ * OID_TCP_OFFLOAD_HARDWARE_CAPABILITIES
+ * ndis_type: NDIS_OBJTYPE_OFFLOAD
+ */
+
+struct ndis_csum_offload {
+	uint32_t			ndis_ip4_txenc;
+	uint32_t			ndis_ip4_txcsum;
+	uint32_t			ndis_ip4_rxenc;
+	uint32_t			ndis_ip4_rxcsum;
+	uint32_t			ndis_ip6_txenc;
+	uint32_t			ndis_ip6_txcsum;
+	uint32_t			ndis_ip6_rxenc;
+	uint32_t			ndis_ip6_rxcsum;
+};
+
+struct ndis_lsov1_offload {
+	uint32_t			ndis_encap;
+	uint32_t			ndis_maxsize;
+	uint32_t			ndis_minsegs;
+	uint32_t			ndis_opts;
+};
+
+struct ndis_ipsecv1_offload {
+	uint32_t			ndis_encap;
+	uint32_t			ndis_ah_esp;
+	uint32_t			ndis_xport_tun;
+	uint32_t			ndis_ip4_opts;
+	uint32_t			ndis_flags;
+	uint32_t			ndis_ip4_ah;
+	uint32_t			ndis_ip4_esp;
+};
+
+struct ndis_lsov2_offload {
+	uint32_t			ndis_ip4_encap;
+	uint32_t			ndis_ip4_maxsz;
+	uint32_t			ndis_ip4_minsg;
+	uint32_t			ndis_ip6_encap;
+	uint32_t			ndis_ip6_maxsz;
+	uint32_t			ndis_ip6_minsg;
+	uint32_t			ndis_ip6_opts;
+};
+
+struct ndis_ipsecv2_offload {
+	uint32_t			ndis_encap;
+	uint16_t			ndis_ip6;
+	uint16_t			ndis_ip4opt;
+	uint16_t			ndis_ip6exth;
+	uint16_t			ndis_ah;
+	uint16_t			ndis_esp;
+	uint16_t			ndis_ah_esp;
+	uint16_t			ndis_xport;
+	uint16_t			ndis_tun;
+	uint16_t			ndis_xport_tun;
+	uint16_t			ndis_lso;
+	uint16_t			ndis_extseq;
+	uint32_t			ndis_udp_esp;
+	uint32_t			ndis_auth;
+	uint32_t			ndis_crypto;
+	uint32_t			ndis_sa_caps;
+};
+
+struct ndis_rsc_offload {
+	uint16_t			ndis_ip4;
+	uint16_t			ndis_ip6;
+};
+
+struct ndis_encap_offload {
+	uint32_t			ndis_flags;
+	uint32_t			ndis_maxhdr;
+};
+
+struct ndis_offload {
+	struct ndis_object_hdr		ndis_hdr;
+	struct ndis_csum_offload	ndis_csum;
+	struct ndis_lsov1_offload	ndis_lsov1;
+	struct ndis_ipsecv1_offload	ndis_ipsecv1;
+	struct ndis_lsov2_offload	ndis_lsov2;
+	uint32_t			ndis_flags;
+	/* NDIS >= 6.1 */
+	struct ndis_ipsecv2_offload	ndis_ipsecv2;
+	/* NDIS >= 6.30 */
+	struct ndis_rsc_offload		ndis_rsc;
+	struct ndis_encap_offload	ndis_encap_gre;
+};
+
+#define	NDIS_OFFLOAD_SIZE		sizeof(struct ndis_offload)
+#define	NDIS_OFFLOAD_SIZE_1		\
+	__offsetof(struct ndis_offload, ndis_ipsecv2)
+#define NDIS_OFFLOAD_SIZE_2		\
+	__offsetof(struct ndis_offload, ndis_rsc)
+
+#define	NDIS_OFFLOAD_REV_1		1	/* NDIS 6.0 */
+#define	NDIS_OFFLOAD_REV_2		2	/* NDIS 6.1 */
+#define	NDIS_OFFLOAD_REV_3		3	/* NDIS 6.30 */
 
 /*
  * Per-packet-info
