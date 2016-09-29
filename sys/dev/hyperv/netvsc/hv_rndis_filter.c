@@ -994,6 +994,33 @@ hn_rndis_halt(struct hn_softc *sc)
 	return (0);
 }
 
+static int
+hn_rndis_fetch_offload(struct hn_softc *sc)
+{
+	struct ndis_offload in, caps;
+	size_t caps_len;
+	int error;
+
+	/*
+	 * Only NDIS 6.30+ is supported.
+	 */
+	KASSERT(sc->hn_ndis_ver >= HN_NDIS_VERSION_6_30,
+	    ("NDIS 6.30+ is required, NDIS version 0x%08x", sc->hn_ndis_ver));
+
+	memset(&in, 0, sizeof(in));
+	in.ndis_hdr.ndis_type = NDIS_OBJTYPE_OFFLOAD;
+	in.ndis_hdr.ndis_rev = NDIS_OFFLOAD_REV_3;
+	in.ndis_hdr.ndis_size = NDIS_OFFLOAD_SIZE;
+
+	caps_len = NDIS_OFFLOAD_SIZE;
+	error = hn_rndis_query(sc, OID_TCP_OFFLOAD_HARDWARE_CAPABILITIES,
+	    &in, NDIS_OFFLOAD_SIZE, &caps, &caps_len);
+	if (error)
+		return (error);
+	if_printf(sc->hn_ifp, "fetched offload hwcaps\n");
+	return (0);
+}
+
 int
 hn_rndis_attach(struct hn_softc *sc)
 {
@@ -1005,6 +1032,8 @@ hn_rndis_attach(struct hn_softc *sc)
 	error = hn_rndis_init(sc);
 	if (error)
 		return (error);
+
+	hn_rndis_fetch_offload(sc);
 
 	/*
 	 * Configure NDIS offload settings.
