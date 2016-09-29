@@ -417,12 +417,10 @@ ioapic_assign_cpu(struct intsrc *isrc, u_int apic_id)
 	 * - And don't allow destination cpu changes.
 	 */
 	if (vm_guest == VM_GUEST_HV) {
-		if (intpin->io_vector) {
+		if (intpin->io_vector)
 			return (EINVAL);
-		} else {
-			printf("stick pin %u to cpu0\n", intpin->io_intpin);
+		else
 			apic_id = 0;
-		}
 	}
 
 	/*
