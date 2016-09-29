@@ -1080,7 +1080,7 @@ hn_rndis_query_offload(struct hn_softc *sc, struct ndis_offload *caps)
 		    caps->ndis_csum.ndis_ip6_txcsum,
 		    caps->ndis_csum.ndis_ip6_rxcsum);
 		if_printf(sc->hn_ifp, "OFFLOAD LSOv2 ip4 maxsz %u minsg %u, "
-		    "ip6 maxsz %u minsg %u, ip6 opts %08x\n",
+		    "ip6 maxsz %u minsg %u, ip6 opts 0x%08x\n",
 		    caps->ndis_lsov2.ndis_ip4_maxsz,
 		    caps->ndis_lsov2.ndis_ip4_minsg,
 		    caps->ndis_lsov2.ndis_ip6_maxsz,
