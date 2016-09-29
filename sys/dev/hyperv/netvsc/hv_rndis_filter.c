@@ -84,6 +84,8 @@ static int hn_rndis_query2(struct hn_softc *sc, uint32_t oid,
 static int hn_rndis_set(struct hn_softc *sc, uint32_t oid, const void *data,
     size_t dlen);
 static int hn_rndis_conf_offload(struct hn_softc *sc);
+static int hn_rndis_query_offload(struct hn_softc *sc,
+    struct ndis_offload *caps);
 
 static __inline uint32_t
 hn_rndis_rid(struct hn_softc *sc)
@@ -820,10 +822,18 @@ done:
 static int
 hn_rndis_conf_offload(struct hn_softc *sc)
 {
+	struct ndis_offload hwcaps;
 	struct ndis_offload_params params;
 	uint32_t caps;
 	size_t paramsz;
 	int error;
+
+	error = hn_rndis_query_offload(sc, &hwcaps);
+	if (error) {
+		if_printf(sc->hn_ifp, "offload hwcaps query failed: %d\n",
+		    error);
+		return (error);
+	}
 
 	/* NOTE: 0 means "no change" */
 	memset(&params, 0, sizeof(params));
@@ -1007,48 +1017,76 @@ hn_rndis_halt(struct hn_softc *sc)
 }
 
 static int
-hn_rndis_fetch_offload(struct hn_softc *sc)
+hn_rndis_query_offload(struct hn_softc *sc, struct ndis_offload *caps)
 {
-	struct ndis_offload in, caps;
-	size_t caps_len;
+	struct ndis_offload in;
+	size_t caps_len, size;
 	int error;
-
-	/*
-	 * Only NDIS 6.30+ is supported.
-	 */
-	KASSERT(sc->hn_ndis_ver >= HN_NDIS_VERSION_6_30,
-	    ("NDIS 6.30+ is required, NDIS version 0x%08x", sc->hn_ndis_ver));
 
 	memset(&in, 0, sizeof(in));
 	in.ndis_hdr.ndis_type = NDIS_OBJTYPE_OFFLOAD;
-	in.ndis_hdr.ndis_rev = NDIS_OFFLOAD_REV_3;
-	in.ndis_hdr.ndis_size = NDIS_OFFLOAD_SIZE;
-
-	if_printf(sc->hn_ifp, "offload size %zu, 1 %zd, 2 %zd\n",
-	    NDIS_OFFLOAD_SIZE, NDIS_OFFLOAD_SIZE_1, NDIS_OFFLOAD_SIZE_2);
+	if (sc->hn_ndis_ver >= HN_NDIS_VERSION_6_30) {
+		in.ndis_hdr.ndis_rev = NDIS_OFFLOAD_REV_3;
+		size = NDIS_OFFLOAD_SIZE;
+	} else if (sc->hn_ndis_ver >= HN_NDIS_VERSION_6_1) {
+		in.ndis_hdr.ndis_rev = NDIS_OFFLOAD_REV_2;
+		size = NDIS_OFFLOAD_SIZE_2;
+	} else {
+		in.ndis_hdr.ndis_rev = NDIS_OFFLOAD_REV_1;
+		size = NDIS_OFFLOAD_SIZE_1;
+	}
+	in.ndis_hdr.ndis_size = size;
 
 	caps_len = NDIS_OFFLOAD_SIZE;
 	error = hn_rndis_query2(sc, OID_TCP_OFFLOAD_HARDWARE_CAPABILITIES,
-	    &in, NDIS_OFFLOAD_SIZE, &caps, &caps_len, NDIS_OFFLOAD_SIZE_1);
+	    &in, size, caps, &caps_len, NDIS_OFFLOAD_SIZE_1);
 	if (error)
 		return (error);
-	if_printf(sc->hn_ifp, "fetched offload hwcaps %zu\n", caps_len);
 
-	if_printf(sc->hn_ifp, "type %02x, rev %u, size %u\n",
-	    caps.ndis_hdr.ndis_type,
-	    caps.ndis_hdr.ndis_rev,
-	    caps.ndis_hdr.ndis_size);
-	if_printf(sc->hn_ifp, "csum ip4tx %08x, ip4rx %08x, ip6tx %08x, ip6rx %08x\n",
-	    caps.ndis_csum.ndis_ip4_txcsum,
-	    caps.ndis_csum.ndis_ip4_rxcsum,
-	    caps.ndis_csum.ndis_ip6_txcsum,
-	    caps.ndis_csum.ndis_ip6_rxcsum);
-	if_printf(sc->hn_ifp, "lsov2 ip4 maxsz %u minsg %u, ip6 maxsz %u minsg %u, ip6 opts %u\n",
-	    caps.ndis_lsov2.ndis_ip4_maxsz,
-	    caps.ndis_lsov2.ndis_ip4_minsg,
-	    caps.ndis_lsov2.ndis_ip6_maxsz,
-	    caps.ndis_lsov2.ndis_ip6_minsg,
-	    caps.ndis_lsov2.ndis_ip6_opts);
+	/*
+	 * Preliminary verification.
+	 */
+	if (caps->ndis_hdr.ndis_type != NDIS_OBJTYPE_OFFLOAD) {
+		if_printf(sc->hn_ifp, "invalid NDIS objtype 0x%02x\n",
+		    caps->ndis_hdr.ndis_type);
+		return (EINVAL);
+	}
+	if (caps->ndis_hdr.ndis_rev < NDIS_OFFLOAD_REV_1) {
+		if_printf(sc->hn_ifp, "invalid NDIS objrev 0x%02x\n",
+		    caps->ndis_hdr.ndis_rev);
+		return (EINVAL);
+	}
+	if (caps->ndis_hdr.ndis_size > caps_len) {
+		if_printf(sc->hn_ifp, "invalid NDIS objsize %u, "
+		    "data size %zu\n", caps->ndis_hdr.ndis_size, caps_len);
+		return (EINVAL);
+	} else if (caps->ndis_hdr.ndis_size < NDIS_OFFLOAD_SIZE_1) {
+		if_printf(sc->hn_ifp, "invalid NDIS objsize %u\n",
+		    caps->ndis_hdr.ndis_size);
+		return (EINVAL);
+	}
+
+	if (bootverbose) {
+		/*
+		 * Fields for NDIS 6.0 are accessable.
+		 */
+		if_printf(sc->hn_ifp, "OFFLOAD rev %u\n",
+		    caps->ndis_hdr.ndis_rev);
+
+		if_printf(sc->hn_ifp, "OFFLOAD CSUM: "
+		    "ip4tx 0x%08x, ip4rx 0x%08x, ip6tx 0x%08x, ip6rx 0x%08x\n",
+		    caps->ndis_csum.ndis_ip4_txcsum,
+		    caps->ndis_csum.ndis_ip4_rxcsum,
+		    caps->ndis_csum.ndis_ip6_txcsum,
+		    caps->ndis_csum.ndis_ip6_rxcsum);
+		if_printf(sc->hn_ifp, "OFFLOAD LSOv2 ip4 maxsz %u minsg %u, "
+		    "ip6 maxsz %u minsg %u, ip6 opts %08x\n",
+		    caps->ndis_lsov2.ndis_ip4_maxsz,
+		    caps->ndis_lsov2.ndis_ip4_minsg,
+		    caps->ndis_lsov2.ndis_ip6_maxsz,
+		    caps->ndis_lsov2.ndis_ip6_minsg,
+		    caps->ndis_lsov2.ndis_ip6_opts);
+	}
 	return (0);
 }
 
@@ -1063,8 +1101,6 @@ hn_rndis_attach(struct hn_softc *sc)
 	error = hn_rndis_init(sc);
 	if (error)
 		return (error);
-
-	hn_rndis_fetch_offload(sc);
 
 	/*
 	 * Configure NDIS offload settings.
