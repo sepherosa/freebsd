@@ -1074,17 +1074,25 @@ hn_rndis_query_offload(struct hn_softc *sc, struct ndis_offload *caps)
 		    caps->ndis_hdr.ndis_rev);
 
 		if_printf(sc->hn_ifp, "OFFLOAD CSUM: "
-		    "ip4tx 0x%08x, ip4rx 0x%08x, ip6tx 0x%08x, ip6rx 0x%08x\n",
+		    "ip4 tx 0x%x/0x%x rx 0x%x/0x%x, "
+		    "ip6 tx 0x%x/0x%x rx 0x%x/0x%x\n",
 		    caps->ndis_csum.ndis_ip4_txcsum,
+		    caps->ndis_csum.ndis_ip4_txenc,
 		    caps->ndis_csum.ndis_ip4_rxcsum,
+		    caps->ndis_csum.ndis_ip4_rxenc,
 		    caps->ndis_csum.ndis_ip6_txcsum,
-		    caps->ndis_csum.ndis_ip6_rxcsum);
-		if_printf(sc->hn_ifp, "OFFLOAD LSOv2 ip4 maxsz %u minsg %u, "
-		    "ip6 maxsz %u minsg %u, ip6 opts 0x%08x\n",
+		    caps->ndis_csum.ndis_ip6_txenc,
+		    caps->ndis_csum.ndis_ip6_rxcsum,
+		    caps->ndis_csum.ndis_ip6_rxenc);
+		if_printf(sc->hn_ifp, "OFFLOAD LSOv2: "
+		    "ip4 maxsz %u minsg %u encap 0x%x, "
+		    "ip6 maxsz %u minsg %u encap 0x%x opts 0x%x\n",
 		    caps->ndis_lsov2.ndis_ip4_maxsz,
 		    caps->ndis_lsov2.ndis_ip4_minsg,
+		    caps->ndis_lsov2.ndis_ip4_encap,
 		    caps->ndis_lsov2.ndis_ip6_maxsz,
 		    caps->ndis_lsov2.ndis_ip6_minsg,
+		    caps->ndis_lsov2.ndis_ip6_encap,
 		    caps->ndis_lsov2.ndis_ip6_opts);
 	}
 	return (0);
