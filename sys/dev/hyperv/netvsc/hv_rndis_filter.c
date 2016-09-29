@@ -1033,6 +1033,22 @@ hn_rndis_fetch_offload(struct hn_softc *sc)
 	if (error)
 		return (error);
 	if_printf(sc->hn_ifp, "fetched offload hwcaps %zu\n", caps_len);
+
+	if_printf(sc->hn_ifp, "type %02x, rev %u, size %u\n",
+	    caps.ndis_hdr.ndis_type,
+	    caps.ndis_hdr.ndis_rev,
+	    caps.ndis_hdr.ndis_size);
+	if_printf(sc->hn_ifp, "csum ip4tx %08x, ip4rx %08x, ip6tx %08x, ip6rx %08x\n",
+	    caps.ndis_csum.ndis_ip4_txcsum,
+	    caps.ndis_csum.ndis_ip4_rxcsum,
+	    caps.ndis_csum.ndis_ip6_txcsum,
+	    caps.ndis_csum.ndis_ip6_rxcsum);
+	if_printf(sc->hn_ifp, "lsov2 ip4 maxsz %u minsg %u, ip6 maxsz %u minsg %u, ip6 opts %u\n",
+	    caps.ndis_lsov2.ndis_ip4_maxsz,
+	    caps.ndis_lsov2.ndis_ip4_minsg,
+	    caps.ndis_lsov2.ndis_ip6_maxsz,
+	    caps.ndis_lsov2.ndis_ip6_minsg,
+	    caps.ndis_lsov2.ndis_ip6_opts);
 	return (0);
 }
 
