@@ -78,6 +78,9 @@ static void hv_rf_receive_data(struct hn_rx_ring *rxr,
 
 static int hn_rndis_query(struct hn_softc *sc, uint32_t oid,
     const void *idata, size_t idlen, void *odata, size_t *odlen0);
+static int hn_rndis_query2(struct hn_softc *sc, uint32_t oid,
+    const void *idata, size_t idlen, void *odata, size_t *odlen0,
+    size_t min_odlen);
 static int hn_rndis_set(struct hn_softc *sc, uint32_t oid, const void *data,
     size_t dlen);
 static int hn_rndis_conf_offload(struct hn_softc *sc);
@@ -624,6 +627,15 @@ static int
 hn_rndis_query(struct hn_softc *sc, uint32_t oid,
     const void *idata, size_t idlen, void *odata, size_t *odlen0)
 {
+
+	return (hn_rndis_query2(sc, oid, idata, idlen, odata, odlen0, *odlen0));
+}
+
+static int
+hn_rndis_query2(struct hn_softc *sc, uint32_t oid,
+    const void *idata, size_t idlen, void *odata, size_t *odlen0,
+    size_t min_odlen)
+{
 	struct rndis_query_req *req;
 	const struct rndis_query_comp *comp;
 	struct vmbus_xact *xact;
@@ -661,7 +673,7 @@ hn_rndis_query(struct hn_softc *sc, uint32_t oid,
 		memcpy(req + 1, idata, idlen);
 	}
 
-	comp_len = sizeof(*comp) + odlen;
+	comp_len = sizeof(*comp) + min_odlen;
 	comp = hn_rndis_xact_execute(sc, xact, rid, reqlen, &comp_len,
 	    REMOTE_NDIS_QUERY_CMPLT);
 	if (comp == NULL) {
@@ -1012,12 +1024,15 @@ hn_rndis_fetch_offload(struct hn_softc *sc)
 	in.ndis_hdr.ndis_rev = NDIS_OFFLOAD_REV_3;
 	in.ndis_hdr.ndis_size = NDIS_OFFLOAD_SIZE;
 
+	if_printf(sc->hn_ifp, "offload size %zu, 1 %zd, 2 %zd\n",
+	    NDIS_OFFLOAD_SIZE, NDIS_OFFLOAD_SIZE_1, NDIS_OFFLOAD_SIZE_2);
+
 	caps_len = NDIS_OFFLOAD_SIZE;
-	error = hn_rndis_query(sc, OID_TCP_OFFLOAD_HARDWARE_CAPABILITIES,
-	    &in, NDIS_OFFLOAD_SIZE, &caps, &caps_len);
+	error = hn_rndis_query2(sc, OID_TCP_OFFLOAD_HARDWARE_CAPABILITIES,
+	    &in, NDIS_OFFLOAD_SIZE, &caps, &caps_len, NDIS_OFFLOAD_SIZE_1);
 	if (error)
 		return (error);
-	if_printf(sc->hn_ifp, "fetched offload hwcaps\n");
+	if_printf(sc->hn_ifp, "fetched offload hwcaps %zu\n", caps_len);
 	return (0);
 }
 
