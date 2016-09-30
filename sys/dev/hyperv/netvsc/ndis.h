@@ -210,40 +210,40 @@ struct ndis_rssprm_toeplitz {
  * ndis_type: NDIS_OBJTYPE_OFFLOAD
  */
 
-#define NDIS_OFFLOAD_ENCAP_NONE		0x0000
-#define NDIS_OFFLOAD_ENCAP_NULL		0x0001
-#define NDIS_OFFLOAD_ENCAP_8023		0x0002
-#define NDIS_OFFLOAD_ENCAP_8023PQ	0x0004
-#define NDIS_OFFLOAD_ENCAP_8023PQ_OOB	0x0008
-#define NDIS_OFFLOAD_ENCAP_RFC1483	0x0010
+#define	NDIS_OFFLOAD_ENCAP_NONE		0x0000
+#define	NDIS_OFFLOAD_ENCAP_NULL		0x0001
+#define	NDIS_OFFLOAD_ENCAP_8023		0x0002
+#define	NDIS_OFFLOAD_ENCAP_8023PQ	0x0004
+#define	NDIS_OFFLOAD_ENCAP_8023PQ_OOB	0x0008
+#define	NDIS_OFFLOAD_ENCAP_RFC1483	0x0010
 
 struct ndis_csum_offload {
 	uint32_t			ndis_ip4_txenc;	/*NDIS_OFFLOAD_ENCAP_*/
 	uint32_t			ndis_ip4_txcsum;
-#define NDIS_TXCSUM_CAP_IP4OPT		0x001
-#define NDIS_TXCSUM_CAP_TCP4OPT		0x004
-#define NDIS_TXCSUM_CAP_TCP4		0x010
-#define NDIS_TXCSUM_CAP_UDP4		0x040
-#define NDIS_TXCSUM_CAP_IP4		0x100
+#define	NDIS_TXCSUM_CAP_IP4OPT		0x001
+#define	NDIS_TXCSUM_CAP_TCP4OPT		0x004
+#define	NDIS_TXCSUM_CAP_TCP4		0x010
+#define	NDIS_TXCSUM_CAP_UDP4		0x040
+#define	NDIS_TXCSUM_CAP_IP4		0x100
 	uint32_t			ndis_ip4_rxenc;	/*NDIS_OFFLOAD_ENCAP_*/
 	uint32_t			ndis_ip4_rxcsum;
-#define NDIS_RXCSUM_CAP_IP4OPT		0x001
-#define NDIS_RXCSUM_CAP_TCP4OPT		0x004
-#define NDIS_RXCSUM_CAP_TCP4		0x010
-#define NDIS_RXCSUM_CAP_UDP4		0x040
-#define NDIS_RXCSUM_CAP_IP4		0x100
+#define	NDIS_RXCSUM_CAP_IP4OPT		0x001
+#define	NDIS_RXCSUM_CAP_TCP4OPT		0x004
+#define	NDIS_RXCSUM_CAP_TCP4		0x010
+#define	NDIS_RXCSUM_CAP_UDP4		0x040
+#define	NDIS_RXCSUM_CAP_IP4		0x100
 	uint32_t			ndis_ip6_txenc;	/*NDIS_OFFLOAD_ENCAP_*/
 	uint32_t			ndis_ip6_txcsum;
-#define NDIS_TXCSUM_CAP_IP6EXT		0x001
-#define NDIS_TXCSUM_CAP_TCP6OPT		0x004
-#define NDIS_TXCSUM_CAP_TCP6		0x010
-#define NDIS_TXCSUM_CAP_UDP6		0x040
+#define	NDIS_TXCSUM_CAP_IP6EXT		0x001
+#define	NDIS_TXCSUM_CAP_TCP6OPT		0x004
+#define	NDIS_TXCSUM_CAP_TCP6		0x010
+#define	NDIS_TXCSUM_CAP_UDP6		0x040
 	uint32_t			ndis_ip6_rxenc;	/*NDIS_OFFLOAD_ENCAP_*/
 	uint32_t			ndis_ip6_rxcsum;
-#define NDIS_RXCSUM_CAP_IP6EXT		0x001
-#define NDIS_RXCSUM_CAP_TCP6OPT		0x004
-#define NDIS_RXCSUM_CAP_TCP6		0x010
-#define NDIS_RXCSUM_CAP_UDP6		0x040
+#define	NDIS_RXCSUM_CAP_IP6EXT		0x001
+#define	NDIS_RXCSUM_CAP_TCP6OPT		0x004
+#define	NDIS_RXCSUM_CAP_TCP6		0x010
+#define	NDIS_RXCSUM_CAP_UDP6		0x040
 };
 
 struct ndis_lsov1_offload {
@@ -271,8 +271,8 @@ struct ndis_lsov2_offload {
 	uint32_t			ndis_ip6_maxsz;
 	uint32_t			ndis_ip6_minsg;
 	uint32_t			ndis_ip6_opts;
-#define NDIS_LSOV2_CAP_IP6EXT		0x001
-#define NDIS_LSOV2_CAP_TCP6OPT		0x004
+#define	NDIS_LSOV2_CAP_IP6EXT		0x001
+#define	NDIS_LSOV2_CAP_TCP6OPT		0x004
 };
 
 struct ndis_ipsecv2_offload {
@@ -321,7 +321,7 @@ struct ndis_offload {
 #define	NDIS_OFFLOAD_SIZE		sizeof(struct ndis_offload)
 #define	NDIS_OFFLOAD_SIZE_1		\
 	__offsetof(struct ndis_offload, ndis_ipsecv2)
-#define NDIS_OFFLOAD_SIZE_2		\
+#define	NDIS_OFFLOAD_SIZE_2		\
 	__offsetof(struct ndis_offload, ndis_rsc)
 
 #define	NDIS_OFFLOAD_REV_1		1	/* NDIS 6.0 */
