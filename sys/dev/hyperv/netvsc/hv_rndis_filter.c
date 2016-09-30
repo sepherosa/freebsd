@@ -951,15 +951,16 @@ hn_rndis_conf_offload(struct hn_softc *sc)
 	}
 
 	if (bootverbose) {
-		if_printf(sc->hn_ifp,
-		    "csum: ip4 %u, tcp4 %u, udp4 %u, tcp6 %u, udp6 %u\n",
+		if_printf(sc->hn_ifp, "OFFLOAD CSUM setting: "
+		    "ip4 %u, tcp4 %u, udp4 %u, tcp6 %u, udp6 %u\n",
 		    params.ndis_ip4csum,
 		    params.ndis_tcp4csum,
 		    params.ndis_udp4csum,
 		    params.ndis_tcp6csum,
 		    params.ndis_udp6csum);
-		if_printf(sc->hn_ifp, "TSO: TSO4 %u, TSO6 %u\n",
-		    params.ndis_lsov2_ip4, params.ndis_lsov2_ip6);
+		if_printf(sc->hn_ifp, "OFFLOAD LSOv2 setting: ip4 %u, ip6 %u\n",
+		    params.ndis_lsov2_ip4,
+		    params.ndis_lsov2_ip6);
 	}
 #endif
 
