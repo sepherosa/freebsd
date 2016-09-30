@@ -68,6 +68,16 @@ __FBSDID("$FreeBSD$");
 
 #define HN_RNDIS_XFER_SIZE		2048
 
+#define HN_NDIS_TXCSUM_CAP_IP4		\
+	(NDIS_TXCSUM_CAP_IP4 | NDIS_TXCSUM_CAP_IP4OPT)
+#define HN_NDIS_TXCSUM_CAP_TCP4		\
+	(NDIS_TXCSUM_CAP_TCP4 | NDIS_TXCSUM_CAP_TCP4OPT)
+#define HN_NDIS_TXCSUM_CAP_TCP6		\
+	(NDIS_TXCSUM_CAP_TCP6 | NDIS_TXCSUM_CAP_TCP6OPT | \
+	 NDIS_TXCSUM_CAP_IP6EXT)
+#define HN_NDIS_TXCSUM_CAP_UDP6		\
+	(NDIS_TXCSUM_CAP_UDP6 | NDIS_TXCSUM_CAP_IP6EXT)
+
 /*
  * Forward declarations
  */
@@ -824,7 +834,7 @@ hn_rndis_conf_offload(struct hn_softc *sc)
 {
 	struct ndis_offload hwcaps;
 	struct ndis_offload_params params;
-	uint32_t caps;
+	uint32_t caps = 0;
 	size_t paramsz;
 	int error;
 
@@ -848,6 +858,7 @@ hn_rndis_conf_offload(struct hn_softc *sc)
 	}
 	params.ndis_hdr.ndis_size = paramsz;
 
+#if 0
 	caps = HN_CAP_IPCS | HN_CAP_TCP4CS | HN_CAP_TCP6CS;
 	params.ndis_ip4csum = NDIS_OFFLOAD_PARAM_TXRX;
 	params.ndis_tcp4csum = NDIS_OFFLOAD_PARAM_TXRX;
@@ -860,6 +871,97 @@ hn_rndis_conf_offload(struct hn_softc *sc)
 	caps |= HN_CAP_TSO4;
 	params.ndis_lsov2_ip4 = NDIS_OFFLOAD_LSOV2_ON;
 	/* XXX ndis_lsov2_ip6 = NDIS_OFFLOAD_LSOV2_ON */
+#else
+	/* TSO */
+	if (hwcaps.ndis_lsov2.ndis_ip4_encap & NDIS_OFFLOAD_ENCAP_8023) {
+		caps |= HN_CAP_TSO4;
+		params.ndis_lsov2_ip4 = NDIS_OFFLOAD_LSOV2_ON;
+		/* TODO: tso_max */
+	}
+	if (hwcaps.ndis_lsov2.ndis_ip6_encap & NDIS_OFFLOAD_ENCAP_8023) {
+#ifdef notyet
+		caps |= HN_CAP_TSO6;
+		params.ndis_lsov2_ip6 = NDIS_OFFLOAD_LSOV2_ON;
+#endif
+		/* TODO: tso_max */
+	}
+
+	/* IPv4 checksum */
+	if ((hwcaps.ndis_csum.ndis_ip4_txcsum & HN_NDIS_TXCSUM_CAP_IP4) ==
+	    HN_NDIS_TXCSUM_CAP_IP4) {
+		caps |= HN_CAP_IPCS;
+		params.ndis_ip4csum = NDIS_OFFLOAD_PARAM_TX;
+	}
+	if (hwcaps.ndis_csum.ndis_ip4_rxcsum & NDIS_RXCSUM_CAP_IP4) {
+		if (params.ndis_ip4csum == NDIS_OFFLOAD_PARAM_TX)
+			params.ndis_ip4csum = NDIS_OFFLOAD_PARAM_TXRX;
+		else
+			params.ndis_ip4csum = NDIS_OFFLOAD_PARAM_RX;
+	}
+
+	/* TCP4 checksum */
+	if ((hwcaps.ndis_csum.ndis_ip4_txcsum & HN_NDIS_TXCSUM_CAP_TCP4) ==
+	    HN_NDIS_TXCSUM_CAP_TCP4) {
+		caps |= HN_CAP_TCP4CS;
+		params.ndis_tcp4csum = NDIS_OFFLOAD_PARAM_TX;
+	}
+	if (hwcaps.ndis_csum.ndis_ip4_rxcsum & NDIS_RXCSUM_CAP_TCP4) {
+		if (params.ndis_tcp4csum == NDIS_OFFLOAD_PARAM_TX)
+			params.ndis_tcp4csum = NDIS_OFFLOAD_PARAM_TXRX;
+		else
+			params.ndis_tcp4csum = NDIS_OFFLOAD_PARAM_RX;
+	}
+
+	/* UDP4 checksum */
+	if (hwcaps.ndis_csum.ndis_ip4_txcsum & NDIS_TXCSUM_CAP_UDP4) {
+		caps |= HN_CAP_UDP4CS;
+		params.ndis_udp4csum = NDIS_OFFLOAD_PARAM_TX;
+	}
+	if (hwcaps.ndis_csum.ndis_ip4_rxcsum & NDIS_RXCSUM_CAP_UDP4) {
+		if (params.ndis_udp4csum == NDIS_OFFLOAD_PARAM_TX)
+			params.ndis_udp4csum = NDIS_OFFLOAD_PARAM_TXRX;
+		else
+			params.ndis_udp4csum = NDIS_OFFLOAD_PARAM_RX;
+	}
+
+	/* TCP6 checksum */
+	if ((hwcaps.ndis_csum.ndis_ip6_txcsum & HN_NDIS_TXCSUM_CAP_TCP6) ==
+	    HN_NDIS_TXCSUM_CAP_TCP6) {
+		caps |= HN_CAP_TCP6CS;
+		params.ndis_tcp6csum = NDIS_OFFLOAD_PARAM_TX;
+	}
+	if (hwcaps.ndis_csum.ndis_ip6_rxcsum & NDIS_RXCSUM_CAP_TCP6) {
+		if (params.ndis_tcp6csum == NDIS_OFFLOAD_PARAM_TX)
+			params.ndis_tcp6csum = NDIS_OFFLOAD_PARAM_TXRX;
+		else
+			params.ndis_tcp6csum = NDIS_OFFLOAD_PARAM_RX;
+	}
+
+	/* UDP6 checksum */
+	if ((hwcaps.ndis_csum.ndis_ip6_txcsum & HN_NDIS_TXCSUM_CAP_UDP6) ==
+	    HN_NDIS_TXCSUM_CAP_UDP6) {
+		caps |= HN_CAP_UDP6CS;
+		params.ndis_udp6csum = NDIS_OFFLOAD_PARAM_TX;
+	}
+	if (hwcaps.ndis_csum.ndis_ip6_rxcsum & NDIS_RXCSUM_CAP_UDP6) {
+		if (params.ndis_udp6csum == NDIS_OFFLOAD_PARAM_TX)
+			params.ndis_udp6csum = NDIS_OFFLOAD_PARAM_TXRX;
+		else
+			params.ndis_udp6csum = NDIS_OFFLOAD_PARAM_RX;
+	}
+
+	if (bootverbose) {
+		if_printf(sc->hn_ifp,
+		    "csum: ip4 %u, tcp4 %u, udp4 %u, tcp6 %u, udp6 %u\n",
+		    params.ndis_ip4csum,
+		    params.ndis_tcp4csum,
+		    params.ndis_udp4csum,
+		    params.ndis_tcp6csum,
+		    params.ndis_udp6csum);
+		if_printf(sc->hn_ifp, "TSO: TSO4 %u, TSO6 %u\n",
+		    params.ndis_lsov2_ip4, params.ndis_lsov2_ip6);
+	}
+#endif
 
 	error = hn_rndis_set(sc, OID_TCP_OFFLOAD_PARAMETERS, &params, paramsz);
 	if (error) {
