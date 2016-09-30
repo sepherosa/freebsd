@@ -94,7 +94,7 @@ static int hn_rndis_query2(struct hn_softc *sc, uint32_t oid,
 static int hn_rndis_set(struct hn_softc *sc, uint32_t oid, const void *data,
     size_t dlen);
 static int hn_rndis_conf_offload(struct hn_softc *sc);
-static int hn_rndis_query_offload(struct hn_softc *sc,
+static int hn_rndis_query_hwcaps(struct hn_softc *sc,
     struct ndis_offload *caps);
 
 static __inline uint32_t
@@ -838,10 +838,9 @@ hn_rndis_conf_offload(struct hn_softc *sc)
 	size_t paramsz;
 	int error;
 
-	error = hn_rndis_query_offload(sc, &hwcaps);
+	error = hn_rndis_query_hwcaps(sc, &hwcaps);
 	if (error) {
-		if_printf(sc->hn_ifp, "offload hwcaps query failed: %d\n",
-		    error);
+		if_printf(sc->hn_ifp, "hwcaps query failed: %d\n", error);
 		return (error);
 	}
 
@@ -937,14 +936,14 @@ hn_rndis_conf_offload(struct hn_softc *sc)
 	}
 
 	if (bootverbose) {
-		if_printf(sc->hn_ifp, "OFFLOAD CSUM setting: "
+		if_printf(sc->hn_ifp, "offload csum: "
 		    "ip4 %u, tcp4 %u, udp4 %u, tcp6 %u, udp6 %u\n",
 		    params.ndis_ip4csum,
 		    params.ndis_tcp4csum,
 		    params.ndis_udp4csum,
 		    params.ndis_tcp6csum,
 		    params.ndis_udp6csum);
-		if_printf(sc->hn_ifp, "OFFLOAD LSOv2 setting: ip4 %u, ip6 %u\n",
+		if_printf(sc->hn_ifp, "offload lsov2: ip4 %u, ip6 %u\n",
 		    params.ndis_lsov2_ip4,
 		    params.ndis_lsov2_ip6);
 	}
@@ -1105,7 +1104,7 @@ hn_rndis_halt(struct hn_softc *sc)
 }
 
 static int
-hn_rndis_query_offload(struct hn_softc *sc, struct ndis_offload *caps)
+hn_rndis_query_hwcaps(struct hn_softc *sc, struct ndis_offload *caps)
 {
 	struct ndis_offload in;
 	size_t caps_len, size;
@@ -1158,10 +1157,10 @@ hn_rndis_query_offload(struct hn_softc *sc, struct ndis_offload *caps)
 		/*
 		 * Fields for NDIS 6.0 are accessable.
 		 */
-		if_printf(sc->hn_ifp, "OFFLOAD rev %u\n",
+		if_printf(sc->hn_ifp, "hwcaps rev %u\n",
 		    caps->ndis_hdr.ndis_rev);
 
-		if_printf(sc->hn_ifp, "OFFLOAD CSUM: "
+		if_printf(sc->hn_ifp, "hwcaps csum: "
 		    "ip4 tx 0x%x/0x%x rx 0x%x/0x%x, "
 		    "ip6 tx 0x%x/0x%x rx 0x%x/0x%x\n",
 		    caps->ndis_csum.ndis_ip4_txcsum,
@@ -1172,7 +1171,7 @@ hn_rndis_query_offload(struct hn_softc *sc, struct ndis_offload *caps)
 		    caps->ndis_csum.ndis_ip6_txenc,
 		    caps->ndis_csum.ndis_ip6_rxcsum,
 		    caps->ndis_csum.ndis_ip6_rxenc);
-		if_printf(sc->hn_ifp, "OFFLOAD LSOv2: "
+		if_printf(sc->hn_ifp, "hwcaps lsov2: "
 		    "ip4 maxsz %u minsg %u encap 0x%x, "
 		    "ip6 maxsz %u minsg %u encap 0x%x opts 0x%x\n",
 		    caps->ndis_lsov2.ndis_ip4_maxsz,
