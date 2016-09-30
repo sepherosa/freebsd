@@ -858,20 +858,6 @@ hn_rndis_conf_offload(struct hn_softc *sc)
 	}
 	params.ndis_hdr.ndis_size = paramsz;
 
-#if 0
-	caps = HN_CAP_IPCS | HN_CAP_TCP4CS | HN_CAP_TCP6CS;
-	params.ndis_ip4csum = NDIS_OFFLOAD_PARAM_TXRX;
-	params.ndis_tcp4csum = NDIS_OFFLOAD_PARAM_TXRX;
-	params.ndis_tcp6csum = NDIS_OFFLOAD_PARAM_TXRX;
-	if (sc->hn_ndis_ver >= HN_NDIS_VERSION_6_30) {
-		caps |= HN_CAP_UDP4CS | HN_CAP_UDP6CS;
-		params.ndis_udp4csum = NDIS_OFFLOAD_PARAM_TXRX;
-		params.ndis_udp6csum = NDIS_OFFLOAD_PARAM_TXRX;
-	}
-	caps |= HN_CAP_TSO4;
-	params.ndis_lsov2_ip4 = NDIS_OFFLOAD_LSOV2_ON;
-	/* XXX ndis_lsov2_ip6 = NDIS_OFFLOAD_LSOV2_ON */
-#else
 	/* TSO */
 	if (hwcaps.ndis_lsov2.ndis_ip4_encap & NDIS_OFFLOAD_ENCAP_8023) {
 		caps |= HN_CAP_TSO4;
@@ -962,7 +948,6 @@ hn_rndis_conf_offload(struct hn_softc *sc)
 		    params.ndis_lsov2_ip4,
 		    params.ndis_lsov2_ip6);
 	}
-#endif
 
 	error = hn_rndis_set(sc, OID_TCP_OFFLOAD_PARAMETERS, &params, paramsz);
 	if (error) {
