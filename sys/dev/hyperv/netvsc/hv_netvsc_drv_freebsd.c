@@ -823,12 +823,6 @@ hn_link_taskfunc(void *xsc, int pending __unused)
 		sc->hn_carrier = 1;
 	else
 		sc->hn_carrier = 0;
-
-	/*
-	 * XXX
-	 * Make sure the any pending if_link_state_change is completed.
-	 */
-	taskqueue_drain(taskqueue_swi, &ifp->if_linktask);
 	if_link_state_change(ifp,
 	    sc->hn_carrier ? LINK_STATE_UP : LINK_STATE_DOWN);
 }
