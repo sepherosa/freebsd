@@ -189,6 +189,7 @@ hv_rf_receive_indicate_status(struct hn_softc *sc, const void *data, int dlen)
 			if_printf(sc->hn_ifp, "network changed, change %u\n",
 			    change);
 		}
+		hn_network_change(sc);
 		break;
 
 	default:
