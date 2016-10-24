@@ -58,18 +58,116 @@ vmbus_ic_negomsg(device_t dev, void *data, int *dlen0,
     uint32_t fw_ver, uint32_t msg_ver)
 {
 	struct vmbus_icmsg_negotiate *nego;
-	int i, cnt, dlen = *dlen0;
+	int i, cnt, dlen = *dlen0, error;
 	uint32_t sel_fw_ver, sel_msg_ver;
-	bool found = false;
+	bool has_fw_ver, has_msg_ver;
 
-	nego = data;
 	/*
-	 * Preliminary message size verification
+	 * Preliminary message verification.
 	 */
 	if (dlen < sizeof(*nego)) {
 		device_printf(dev, "truncated ic negotiate, len %d\n", dlen);
-		return EINVAL;
+		return (EINVAL);
 	}
+	nego = data;
+
+	if (nego->ic_fwver_cnt == 0) {
+		device_printf(dev, "ic negotiate does not contain framework "
+		    "version %u\n", nego->ic_fwver_cnt);
+		return (EINVAL);
+	}
+	if (nego->ic_msgver_cnt == 0) {
+		device_printf(dev, "ic negotiate does not contain message "
+		    "version %u\n", nego->ic_msgver_cnt);
+		return (EINVAL);
+	}
+
+	cnt = nego->ic_fwver_cnt + nego->ic_msgver_cnt;
+	if (dlen < __offsetof(struct vmbus_icmsg_negotiate, ic_ver[cnt])) {
+		device_printf(dev, "ic negotiate does not contain versions "
+		    "%d\n", dlen);
+		return (EINVAL);
+	}
+
+	error = EOPNOTSUPP;
+
+	/*
+	 * Find the best match framework version.
+	 */
+	has_fw_ver = false;
+	for (i = 0; i < nego->ic_fwver_cnt; ++i) {
+		if (VMBUS_ICVER_LE(nego->ic_ver[i], fw_ver)) {
+			if (!has_fw_ver) {
+				sel_fw_ver = nego->ic_ver[i];
+				has_fw_ver = true;
+			} else if (VMBUS_ICVER_GT(nego->ic_ver[i],
+			    sel_fw_ver)) {
+				sel_fw_ver = nego->ic_ver[i];
+			}
+		}
+	}
+	if (!has_fw_ver) {
+		device_printf(dev, "failed to select framework version\n");
+		goto done;
+	}
+
+	/*
+	 * Fine the best match message version.
+	 */
+	has_msg_ver = false;
+	for (i = nego->ic_fwver_cnt;
+	    i < nego->ic_fwver_cnt + nego->ic_msgver_cnt; ++i) {
+		if (VMBUS_ICVER_LE(nego->ic_ver[i], msg_ver)) {
+			if (!has_msg_ver) {
+				sel_msg_ver = nego->ic_ver[i];
+				has_msg_ver = true;
+			} else if (VMBUS_ICVER_GT(nego->ic_ver[i],
+			    sel_msg_ver)) {
+				sel_msg_ver = nego->ic_ver[i];
+			}
+		}
+	}
+	if (!has_msg_ver) {
+		device_printf(dev, "failed to select message version\n");
+		goto done;
+	}
+
+	error = 0;
+done:
+	if (bootverbose || !has_fw_ver || !has_msg_ver) {
+		if (has_fw_ver) {
+			device_printf(dev, "sel framework version: %u.%u\n",
+			    VMBUS_ICVER_MAJOR(sel_fw_ver),
+			    VMBUS_ICVER_MINOR(sel_fw_ver));
+		}
+		for (i = 0; i < nego->ic_fwver_cnt; i++) {
+			device_printf(dev, "supp framework version: %u.%u\n",
+			    VMBUS_ICVER_MAJOR(nego->ic_ver[i]),
+			    VMBUS_ICVER_MINOR(nego->ic_ver[i]));
+		}
+
+		if (has_msg_ver) {
+			device_printf(dev, "sel message version: %u.%u\n",
+			    VMBUS_ICVER_MAJOR(sel_msg_ver),
+			    VMBUS_ICVER_MINOR(sel_msg_ver));
+		}
+		for (i = nego->ic_fwver_cnt;
+		    i < nego->ic_fwver_cnt + nego->ic_msgver_cnt; i++) {
+			device_printf(dev, "supp message version: %u.%u\n",
+			    VMBUS_ICVER_MAJOR(nego->ic_ver[i]),
+			    VMBUS_ICVER_MINOR(nego->ic_ver[i]));
+		}
+	}
+	if (error)
+		return (error);
+
+	/* Framework version. */
+	nego->ic_fwver_cnt = 1;
+	nego->ic_ver[0] = sel_fw_ver;
+
+	/* Message version. */
+	nego->ic_msgver_cnt = 1;
+	nego->ic_ver[1] = sel_msg_ver;
 
 	/* Update data size */
 	nego->ic_hdr.ic_dsize = VMBUS_IC_NEGOSZ -
@@ -79,69 +177,7 @@ vmbus_ic_negomsg(device_t dev, void *data, int *dlen0,
 	if (dlen < VMBUS_IC_NEGOSZ)
 		*dlen0 = VMBUS_IC_NEGOSZ;
 
-	cnt = nego->ic_fwver_cnt + nego->ic_msgver_cnt;
-	if (dlen < __offsetof(struct vmbus_icmsg_negotiate, ic_ver[cnt])) {
-		device_printf(dev, "ic negotiate does not contain versions %d\n",
-		    dlen);
-		return EINVAL;
-	}
-	
-	/*
-	 * Select the framework version number we will support.
-	 */
-	for (i = 0; i < nego->ic_fwver_cnt; i++) {
-		if (nego->ic_ver[i] == fw_ver) {
-			sel_fw_ver = nego->ic_ver[i];
-			found = true;
-			break;
-		}
-	}
-
-	if (!found)
-		goto handle_error;
-	found = false;
-
-	/*
-	 * Select the message version number we will support.
-	 */
-	for (i = nego->ic_fwver_cnt;
-	    i < nego->ic_fwver_cnt + nego->ic_msgver_cnt; i++) {
-		if (nego->ic_ver[i] == msg_ver) {
-			sel_msg_ver = nego->ic_ver[i];
-			found = true;
-			break;
-		}
-	}
-
-handle_error:
-	if (bootverbose) {
-		device_printf(dev, "selected framework ver: [%d:%d]\n",
-		    VMBUS_ICVER_MAJOR(sel_fw_ver), VMBUS_ICVER_MINOR(sel_fw_ver));
-		for (i = 0; i < nego->ic_fwver_cnt; i++) {
-			device_printf(dev, "host provided framework ver: [%d:%d]\n",
-			    VMBUS_ICVER_MAJOR(nego->ic_ver[i]),
-			    VMBUS_ICVER_MINOR(nego->ic_ver[i]));
-		}
-		device_printf(dev, "selected message ver: [%d:%d]\n",
-		    VMBUS_ICVER_MAJOR(sel_msg_ver), VMBUS_ICVER_MINOR(sel_msg_ver));
-		for (i = nego->ic_fwver_cnt;
-		    i < nego->ic_fwver_cnt + nego->ic_msgver_cnt; i++) {
-			device_printf(dev, "host provided message ver: [%d:%d]\n",
-			    VMBUS_ICVER_MAJOR(nego->ic_ver[i]),
-			    VMBUS_ICVER_MINOR(nego->ic_ver[i]));
-		}
-	}
-	if (!found) {
-		nego->ic_fwver_cnt = 0;
-		nego->ic_msgver_cnt = 0;
-	} else {
-		nego->ic_fwver_cnt = 1;
-		nego->ic_msgver_cnt = 1;
-	}
-
-	nego->ic_ver[0] = sel_fw_ver;
-	nego->ic_ver[1] = sel_msg_ver;
-	return (found ? 0 : EOPNOTSUPP);
+	return (0);
 }
 
 int
