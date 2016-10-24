@@ -76,17 +76,11 @@ __FBSDID("$FreeBSD$");
 #define KVP_ERROR	1
 #define kvp_hdr		hdr.kvp_hdr
 
-#define KVP_WS2008_MAJOR    1
-#define KVP_WS2008_MINOR    0
-#define KVP_WS2008_VERSION  VMBUS_IC_VERSION(KVP_WS2008_MAJOR, KVP_WS2008_MINOR)
+#define KVP_FWVER_MAJOR		3
+#define KVP_FWVER		VMBUS_IC_VERSION(KVP_FWVER_MAJOR, 0)
 
-#define KVP_WIN7_MAJOR      3
-#define KVP_WIN7_MINOR      0
-#define KVP_WIN7_VERSION    VMBUS_IC_VERSION(KVP_WIN7_MAJOR, KVP_WIN7_MINOR)
-
-#define KVP_WIN8_MAJOR      4
-#define KVP_WIN8_MINOR      0
-#define KVP_WIN8_VERSION    VMBUS_IC_VERSION(KVP_WIN8_MAJOR, KVP_WIN8_MINOR)
+#define KVP_MSGVER_MAJOR	4
+#define KVP_MSGVER		VMBUS_IC_VERSION(KVP_MSGVER_MAJOR, 0)
 
 /* hv_kvp debug control */
 static int hv_kvp_log = 0;
@@ -594,14 +588,12 @@ hv_kvp_process_request(void *context, int pending)
 	struct hv_vmbus_icmsg_hdr *icmsghdrp;
 	int ret = 0, error;
 	hv_kvp_sc *sc;
-	uint32_t vmbus_version, fw_ver, msg_ver;
 
 	hv_kvp_log_info("%s: entering hv_kvp_process_request\n", __func__);
 
 	sc = (hv_kvp_sc*)context;
 	kvp_buf = sc->util_sc.receive_buffer;
 	channel = vmbus_get_channel(sc->dev);
-	vmbus_version = VMBUS_GET_VERSION(device_get_parent(sc->dev), sc->dev);
 
 	recvlen = sc->util_sc.ic_buflen;
 	ret = vmbus_chan_recv(channel, kvp_buf, &recvlen, &requestid);
@@ -614,20 +606,9 @@ hv_kvp_process_request(void *context, int pending)
 
 		hv_kvp_transaction_init(sc, recvlen, requestid, kvp_buf);
 		if (icmsghdrp->icmsgtype == HV_ICMSGTYPE_NEGOTIATE) {
-			switch(vmbus_version) {
-			case VMBUS_VERSION_WS2008:
-				fw_ver  = UTIL_WS2008_FW_VERSION;
-				msg_ver = KVP_WS2008_VERSION;
-				break;
-			case VMBUS_VERSION_WIN7:
-				fw_ver = UTIL_FW_VERSION;
-				msg_ver = KVP_WIN7_VERSION;
-			default:
-				fw_ver  = UTIL_FW_VERSION;
-				msg_ver = KVP_WIN8_VERSION;
-			}
 			error = vmbus_ic_negomsg(sc->dev, kvp_buf, &recvlen,
-			    fw_ver, msg_ver);
+			    KVP_FWVER, KVP_MSGVER);
+			/* XXX handle vmbus_ic_negomsg failure. */
 			hv_kvp_respond_host(sc, error);
 
 			/*

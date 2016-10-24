@@ -39,12 +39,14 @@ __FBSDID("$FreeBSD$");
 #include <dev/hyperv/utilities/vmbus_icreg.h>
 
 #include "vmbus_if.h"
-#define HB_MAJOR            3
-#define HB_MINOR            0
-#define HB_VERSION          VMBUS_IC_VERSION(HB_MAJOR, HB_MINOR)
 
-#define HB_WS2008_MAJOR     1
-#define HB_WS2008_VERSION   VMBUS_IC_VERSION(HB_WS2008_MAJOR, HB_MINOR)
+#define VMBUS_HEARTBEAT_FWVER_MAJOR	3
+#define VMBUS_HEARTBEAT_FWVER		\
+	VMBUS_IC_VERSION(VMBUS_HEARTBEAT_FWVER_MAJOR, 0)
+
+#define VMBUS_HEARTBEAT_MSGVER_MAJOR	3
+#define VMBUS_HEARTBEAT_MSGVER		\
+	VMBUS_IC_VERSION(VMBUS_HEARTBEAT_MSGVER_MAJOR, 0)
 
 static const struct vmbus_ic_desc vmbus_heartbeat_descs[] = {
 	{
@@ -64,9 +66,7 @@ vmbus_heartbeat_cb(struct vmbus_channel *chan, void *xsc)
 	int dlen, error;
 	uint64_t xactid;
 	void *data;
-	uint32_t vmbus_version, fw_ver, msg_ver;
 
-	vmbus_version = VMBUS_GET_VERSION(device_get_parent(sc->ic_dev), sc->ic_dev);
 	/*
 	 * Receive request.
 	 */
@@ -88,16 +88,8 @@ vmbus_heartbeat_cb(struct vmbus_channel *chan, void *xsc)
 	 */
 	switch (hdr->ic_type) {
 	case VMBUS_ICMSG_TYPE_NEGOTIATE:
-		switch(vmbus_version) {
-		case VMBUS_VERSION_WS2008:
-			fw_ver  = UTIL_WS2008_FW_VERSION;
-			msg_ver = HB_WS2008_VERSION;
-			break;
-		default:
-			fw_ver  = UTIL_FW_VERSION;
-			msg_ver = HB_VERSION;
-		}
-		error = vmbus_ic_negomsg(sc->ic_dev, data, &dlen, fw_ver, msg_ver);
+		error = vmbus_ic_negomsg(sc->ic_dev, data, &dlen,
+		    VMBUS_HEARTBEAT_FWVER, VMBUS_HEARTBEAT_MSGVER);
 		if (error)
 			return;
 		break;
