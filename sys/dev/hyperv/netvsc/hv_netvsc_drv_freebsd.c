@@ -471,10 +471,18 @@ hn_set_rxfilter(struct hn_softc *sc)
 		filter = NDIS_PACKET_TYPE_DIRECTED;
 		if (ifp->if_flags & IFF_BROADCAST)
 			filter |= NDIS_PACKET_TYPE_BROADCAST;
+#ifdef notyet
+		/*
+		 * See the comment in SIOCADDMULTI/SIOCDELMULTI.
+		 */
 		/* TODO: support multicast list */
 		if ((ifp->if_flags & IFF_ALLMULTI) ||
 		    !TAILQ_EMPTY(&ifp->if_multiaddrs))
 			filter |= NDIS_PACKET_TYPE_ALL_MULTICAST;
+#else
+		/* Always enable ALLMULTI */
+		filter |= NDIS_PACKET_TYPE_ALL_MULTICAST;
+#endif
 	}
 
 	if (sc->hn_rx_filter != filter) {
@@ -1938,6 +1946,16 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
+#ifdef notyet
+		/*
+		 * XXX
+		 * Multicast uses mutex, while RNDIS RX filter setting
+		 * sleeps.  We workaround this by always enabling
+		 * ALLMULTI.  ALLMULTI would actually always be on, even
+		 * if we supported the SIOCADDMULTI/SIOCDELMULTI, since
+		 * we don't support multicast address list configuration
+		 * for this driver.
+		 */
 		HN_LOCK(sc);
 
 		if ((sc->hn_flags & HN_FLAG_SYNTH_ATTACHED) == 0) {
@@ -1948,6 +1966,7 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			hn_set_rxfilter(sc);
 
 		HN_UNLOCK(sc);
+#endif
 		break;
 
 	case SIOCSIFMEDIA:
