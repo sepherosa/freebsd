@@ -170,7 +170,7 @@ vmbus_timesync_cb(struct vmbus_channel *chan, void *xsc)
 	 */
 	switch (hdr->ic_type) {
 	case VMBUS_ICMSG_TYPE_NEGOTIATE:
-		error = vmbus_ic_negomsg(sc->ic_dev, data, &dlen,
+		error = vmbus_ic_negomsg(sc, data, &dlen,
 		    VMBUS_TIMESYNC_FWVER, VMBUS_TIMESYNC_MSGVER);
 		if (error)
 			return;

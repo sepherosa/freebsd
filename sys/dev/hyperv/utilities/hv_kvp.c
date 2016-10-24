@@ -606,8 +606,8 @@ hv_kvp_process_request(void *context, int pending)
 
 		hv_kvp_transaction_init(sc, recvlen, requestid, kvp_buf);
 		if (icmsghdrp->icmsgtype == HV_ICMSGTYPE_NEGOTIATE) {
-			error = vmbus_ic_negomsg(sc->dev, kvp_buf, &recvlen,
-			    KVP_FWVER, KVP_MSGVER);
+			error = vmbus_ic_negomsg(&sc->util_sc,
+			    kvp_buf, &recvlen, KVP_FWVER, KVP_MSGVER);
 			/* XXX handle vmbus_ic_negomsg failure. */
 			hv_kvp_respond_host(sc, error);
 
