@@ -704,7 +704,7 @@ vmbus_chan_close_internal(struct vmbus_channel *chan)
 		    chan->ch_id, error);
 		return;
 	} else if (bootverbose) {
-		device_printf(sc->vmbus_dev, "close chan%u\n", chan->ch_id);
+		vmbus_chan_printf(chan, "close chan%u\n", chan->ch_id);
 	}
 
 	/*
@@ -1435,10 +1435,8 @@ vmbus_chan_release(struct vmbus_channel *chan)
 		    "chfree(chan%u) msg hypercall exec failed: %d\n",
 		    chan->ch_id, error);
 	} else {
-		if (bootverbose) {
-			device_printf(sc->vmbus_dev, "chan%u freed\n",
-			    chan->ch_id);
-		}
+		if (bootverbose)
+			vmbus_chan_printf(chan, "chan%u freed\n", chan->ch_id);
 	}
 	return (error);
 }
@@ -1726,7 +1724,7 @@ vmbus_chan_printf(const struct vmbus_channel *chan, const char *fmt, ...)
 	device_t dev;
 	int retval;
 
-	if (chan->ch_dev == NULL || !device_is_attached(chan->ch_dev))
+	if (chan->ch_dev == NULL || !device_is_alive(chan->ch_dev))
 		dev = chan->ch_vmbus->vmbus_dev;
 	else
 		dev = chan->ch_dev;
