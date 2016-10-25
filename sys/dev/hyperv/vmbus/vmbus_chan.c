@@ -93,7 +93,7 @@ static void			vmbus_chan_msgproc_chrescind(
 				    const struct vmbus_message *);
 
 static int			vmbus_chan_printf(const struct vmbus_channel *,
-				    const char *, ...);
+				    const char *, ...) __printflike(2, 3);
 
 /*
  * Vmbus channel message processing.
@@ -1156,11 +1156,6 @@ vmbus_chan_add(struct vmbus_channel *newchan)
 		return EINVAL;
 	}
 
-	if (bootverbose) {
-		device_printf(sc->vmbus_dev, "chan%u subidx%u offer\n",
-		    newchan->ch_id, newchan->ch_subidx);
-	}
-
 	mtx_lock(&sc->vmbus_prichan_lock);
 	TAILQ_FOREACH(prichan, &sc->vmbus_prichans, ch_prilink) {
 		/*
@@ -1226,6 +1221,15 @@ done:
 	mtx_lock(&sc->vmbus_chan_lock);
 	vmbus_chan_ins_list(sc, newchan);
 	mtx_unlock(&sc->vmbus_chan_lock);
+
+	if (bootverbose) {
+		vmbus_chan_printf(newchan, "chan%u subidx%u offer\n",
+		    newchan->ch_id, newchan->ch_subidx);
+	}
+
+	/* Select default cpu for this channel. */
+	vmbus_chan_cpu_default(newchan);
+
 	return 0;
 }
 
@@ -1341,9 +1345,6 @@ vmbus_chan_msgproc_choffer(struct vmbus_softc *sc,
 	TASK_INIT(&chan->ch_attach_task, 0, attach_fn, chan);
 	TASK_INIT(&chan->ch_detach_task, 0, detach_fn, chan);
 
-	/* Select default cpu for this channel. */
-	vmbus_chan_cpu_default(chan);
-
 	error = vmbus_chan_add(chan);
 	if (error) {
 		device_printf(sc->vmbus_dev, "add chan%u failed: %d\n",
@@ -1366,11 +1367,6 @@ vmbus_chan_msgproc_chrescind(struct vmbus_softc *sc,
 		device_printf(sc->vmbus_dev, "invalid rescinded chan%u\n",
 		    note->chm_chanid);
 		return;
-	}
-
-	if (bootverbose) {
-		device_printf(sc->vmbus_dev, "chan%u rescinded\n",
-		    note->chm_chanid);
 	}
 
 	/*
@@ -1402,6 +1398,9 @@ vmbus_chan_msgproc_chrescind(struct vmbus_softc *sc,
 		vmbus_chan_rem_prilist(sc, chan);
 		mtx_unlock(&sc->vmbus_prichan_lock);
 	}
+
+	if (bootverbose)
+		vmbus_chan_printf(chan, "chan%u rescinded\n", note->chm_chanid);
 
 	/* Detach the target channel. */
 	taskqueue_enqueue(chan->ch_mgmt_tq, &chan->ch_detach_task);
