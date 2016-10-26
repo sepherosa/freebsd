@@ -3090,7 +3090,7 @@ hn_create_tx_data(struct hn_softc *sc, int ring_cnt)
 	 * NOTE: It is shared by all channels.
 	 */
 	sc->hn_chim = hyperv_dmamem_alloc(bus_get_dma_tag(sc->hn_dev),
-	    PAGE_SIZE, 0, NETVSC_SEND_BUFFER_SIZE, &sc->hn_chim_dma,
+	    PAGE_SIZE, 0, HN_CHIM_SIZE, &sc->hn_chim_dma,
 	    BUS_DMA_WAITOK | BUS_DMA_ZERO);
 	if (sc->hn_chim == NULL) {
 		device_printf(sc->hn_dev, "allocate txbuf failed\n");

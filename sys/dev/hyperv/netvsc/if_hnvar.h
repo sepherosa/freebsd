@@ -34,6 +34,8 @@
 #include <dev/hyperv/include/vmbus.h>
 #include <dev/hyperv/netvsc/if_hnreg.h>
 
+#define HN_CHIM_SIZE			(15 * 1024 * 1024)
+
 struct hn_softc;
 
 struct vmbus_channel;

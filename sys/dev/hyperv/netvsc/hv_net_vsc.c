@@ -219,8 +219,7 @@ hn_nvs_conn_chim(struct hn_softc *sc)
 	 * Sub-channels just share this chimney sending buffer.
 	 */
 	error = vmbus_chan_gpadl_connect(sc->hn_prichan,
-  	    sc->hn_chim_dma.hv_paddr, NETVSC_SEND_BUFFER_SIZE,
-	    &sc->hn_chim_gpadl);
+  	    sc->hn_chim_dma.hv_paddr, HN_CHIM_SIZE, &sc->hn_chim_gpadl);
 	if (error) {
 		if_printf(sc->hn_ifp, "chim gpadl conn failed: %d\n", error);
 		goto cleanup;
@@ -267,8 +266,8 @@ hn_nvs_conn_chim(struct hn_softc *sc)
 	}
 
 	sc->hn_chim_szmax = sectsz;
-	sc->hn_chim_cnt = NETVSC_SEND_BUFFER_SIZE / sc->hn_chim_szmax;
-	if (NETVSC_SEND_BUFFER_SIZE % sc->hn_chim_szmax != 0) {
+	sc->hn_chim_cnt = HN_CHIM_SIZE / sc->hn_chim_szmax;
+	if (HN_CHIM_SIZE % sc->hn_chim_szmax != 0) {
 		if_printf(sc->hn_ifp, "chimney sending sections are "
 		    "not properly aligned\n");
 	}
