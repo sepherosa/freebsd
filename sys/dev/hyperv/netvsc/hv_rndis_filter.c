@@ -1089,7 +1089,7 @@ hn_rndis_conf_rss(struct hn_softc *sc, uint16_t flags)
 {
 	struct ndis_rssprm_toeplitz *rss = &sc->hn_rss;
 	struct ndis_rss_params *prm = &rss->rss_params;
-	int error;
+	int error, rss_size;
 
 	/*
 	 * Only NDIS 6.20+ is supported:
@@ -1099,29 +1099,41 @@ hn_rndis_conf_rss(struct hn_softc *sc, uint16_t flags)
 	KASSERT(sc->hn_ndis_ver >= HN_NDIS_VERSION_6_20,
 	    ("NDIS 6.20+ is required, NDIS version 0x%08x", sc->hn_ndis_ver));
 
+	/* XXX only one can be specified through, popcnt? */
+	KASSERT((sc->hn_rss_hash & NDIS_HASH_FUNCTION_MASK), ("no hash func"));
+	KASSERT((sc->hn_rss_hash & NDIS_HASH_TYPE_MASK), ("no hash types"));
+	KASSERT(sc->hn_rss_ind_size > 0, ("no indirect table size"));
+
+	if (bootverbose) {
+		if_printf(sc->hn_ifp, "RSS indirect table size %d, "
+		    "hash 0x%08x\n", sc->hn_rss_ind_size, sc->hn_rss_hash);
+	}
+
 	/*
 	 * NOTE:
 	 * DO NOT whack rss_key and rss_ind, which are setup by the caller.
 	 */
 	memset(prm, 0, sizeof(*prm));
+	rss_size = NDIS_RSSPRM_TOEPLITZ_SIZE(sc->hn_rss_ind_size);
 
 	prm->ndis_hdr.ndis_type = NDIS_OBJTYPE_RSS_PARAMS;
 	prm->ndis_hdr.ndis_rev = NDIS_RSS_PARAMS_REV_2;
-	prm->ndis_hdr.ndis_size = sizeof(*rss);
+	prm->ndis_hdr.ndis_size = rss_size;
 	prm->ndis_flags = flags;
-	prm->ndis_hash = NDIS_HASH_FUNCTION_TOEPLITZ |
-	    NDIS_HASH_IPV4 | NDIS_HASH_TCP_IPV4 |
-	    NDIS_HASH_IPV6 | NDIS_HASH_TCP_IPV6;
-	/* TODO: Take ndis_rss_caps.ndis_nind into account */
-	prm->ndis_indsize = sizeof(rss->rss_ind);
+	prm->ndis_hash = sc->hn_rss_hash;
+	prm->ndis_indsize = sizeof(rss->rss_ind[0]) * sc->hn_rss_ind_size;
 	prm->ndis_indoffset =
 	    __offsetof(struct ndis_rssprm_toeplitz, rss_ind[0]);
 	prm->ndis_keysize = sizeof(rss->rss_key);
 	prm->ndis_keyoffset =
 	    __offsetof(struct ndis_rssprm_toeplitz, rss_key[0]);
 
+	if_printf(sc->hn_ifp, "rss size %d, %zu; ind size %u, %zu\n",
+	    rss_size, sizeof(*rss),
+	    prm->ndis_indsize, sizeof(rss->rss_ind));
+
 	error = hn_rndis_set(sc, OID_GEN_RECEIVE_SCALE_PARAMETERS,
-	    rss, sizeof(*rss));
+	    rss, rss_size);
 	if (error) {
 		if_printf(sc->hn_ifp, "RSS config failed: %d\n", error);
 	} else {

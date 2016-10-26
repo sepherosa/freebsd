@@ -214,6 +214,9 @@ struct ndis_rssprm_toeplitz {
 	uint32_t			rss_ind[NDIS_HASH_INDCNT];
 };
 
+#define	NDIS_RSSPRM_TOEPLITZ_SIZE(nind)	\
+	__offsetof(struct ndis_rssprm_toeplitz, rss_ind[nind])
+
 /*
  * OID_TCP_OFFLOAD_HARDWARE_CAPABILITIES
  * ndis_type: NDIS_OBJTYPE_OFFLOAD
