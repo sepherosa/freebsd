@@ -1855,7 +1855,7 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	switch (cmd) {
 	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > NETVSC_MAX_CONFIGURABLE_MTU) {
+		if (ifr->ifr_mtu > HN_MTU_MAX) {
 			error = EINVAL;
 			break;
 		}

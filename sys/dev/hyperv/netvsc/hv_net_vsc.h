@@ -66,21 +66,6 @@
 
 #define HN_USE_TXDESC_BUFRING
 
-/*
- * The following arguably belongs in a separate header file
- */
-
-/*
- * Defines
- */
-
-/*
- * Maximum MTU we permit to be configured for a netvsc interface.
- * When the code was developed, a max MTU of 12232 was tested and
- * proven to work.  9K is a reasonable maximum for an Ethernet.
- */
-#define NETVSC_MAX_CONFIGURABLE_MTU		(9 * 1024)
-
 #define NETVSC_PACKET_SIZE			PAGE_SIZE
 
 /*
