@@ -2683,7 +2683,7 @@ hn_create_rx_data(struct hn_softc *sc, int ring_cnt)
 		rxr->hn_ifp = sc->hn_ifp;
 		if (i < sc->hn_tx_ring_cnt)
 			rxr->hn_txr = &sc->hn_tx_ring[i];
-		rxr->hn_rdbuf = malloc(NETVSC_PACKET_SIZE, M_DEVBUF, M_WAITOK);
+		rxr->hn_pktbuf = malloc(HN_PKTBUF_LEN, M_DEVBUF, M_WAITOK);
 		rxr->hn_rx_idx = i;
 		rxr->hn_rxbuf = sc->hn_rxbuf;
 
@@ -2830,7 +2830,7 @@ hn_destroy_rx_data(struct hn_softc *sc)
 #if defined(INET) || defined(INET6)
 		tcp_lro_free(&rxr->hn_lro);
 #endif
-		free(rxr->hn_rdbuf, M_DEVBUF);
+		free(rxr->hn_pktbuf, M_DEVBUF);
 	}
 	free(sc->hn_rx_ring, M_DEVBUF);
 	sc->hn_rx_ring = NULL;
@@ -4181,9 +4181,9 @@ hn_chan_callback(struct vmbus_channel *chan, void *xrxr)
 	struct hn_rx_ring *rxr = xrxr;
 	struct hn_softc *sc = rxr->hn_ifp->if_softc;
 	void *buffer;
-	int bufferlen = NETVSC_PACKET_SIZE;
+	int bufferlen = HN_PKTBUF_LEN;
 
-	buffer = rxr->hn_rdbuf;
+	buffer = rxr->hn_pktbuf;
 	do {
 		struct vmbus_chanpkt_hdr *pkt = buffer;
 		uint32_t bytes_rxed;
@@ -4210,7 +4210,7 @@ hn_chan_callback(struct vmbus_channel *chan, void *xrxr)
 			}
 		} else if (ret == ENOBUFS) {
 			/* Handle large packet */
-			if (bufferlen > NETVSC_PACKET_SIZE) {
+			if (bufferlen > HN_PKTBUF_LEN) {
 				free(buffer, M_DEVBUF);
 				buffer = NULL;
 			}
@@ -4231,7 +4231,7 @@ hn_chan_callback(struct vmbus_channel *chan, void *xrxr)
 		}
 	} while (1);
 
-	if (bufferlen > NETVSC_PACKET_SIZE)
+	if (bufferlen > HN_PKTBUF_LEN)
 		free(buffer, M_DEVBUF);
 
 	hv_rf_channel_rollup(rxr, rxr->hn_txr);

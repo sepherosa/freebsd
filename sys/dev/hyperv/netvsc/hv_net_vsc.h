@@ -66,8 +66,6 @@
 
 #define HN_USE_TXDESC_BUFRING
 
-#define NETVSC_PACKET_SIZE			PAGE_SIZE
-
 /*
  * Data types
  */
@@ -94,7 +92,7 @@ struct hn_tx_ring;
 struct hn_rx_ring {
 	struct ifnet	*hn_ifp;
 	struct hn_tx_ring *hn_txr;
-	void		*hn_rdbuf;
+	void		*hn_pktbuf;
 	uint8_t		*hn_rxbuf;	/* shadow sc->hn_rxbuf */
 	int		hn_rx_idx;
 

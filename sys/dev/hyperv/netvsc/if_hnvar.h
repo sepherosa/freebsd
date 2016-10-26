@@ -42,6 +42,8 @@
 /* Claimed to be 12232B */
 #define HN_MTU_MAX			(9 * 1024)
 
+#define HN_PKTBUF_LEN			4096
+
 struct hn_softc;
 
 struct vmbus_channel;
