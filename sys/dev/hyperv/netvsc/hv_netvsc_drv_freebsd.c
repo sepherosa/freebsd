@@ -2665,9 +2665,7 @@ hn_create_rx_data(struct hn_softc *sc, int ring_cnt)
 		struct hn_rx_ring *rxr = &sc->hn_rx_ring[i];
 
 		rxr->hn_br = hyperv_dmamem_alloc(bus_get_dma_tag(dev),
-		    PAGE_SIZE, 0,
-		    NETVSC_DEVICE_RING_BUFFER_SIZE +
-		    NETVSC_DEVICE_RING_BUFFER_SIZE,
+		    PAGE_SIZE, 0, HN_TXBR_SIZE + HN_RXBR_SIZE,
 		    &rxr->hn_br_dma, BUS_DMA_WAITOK);
 		if (rxr->hn_br == NULL) {
 			device_printf(dev, "allocate bufring failed\n");
@@ -3508,8 +3506,8 @@ hn_chan_attach(struct hn_softc *sc, struct vmbus_channel *chan)
 	 */
 	cbr.cbr = rxr->hn_br;
 	cbr.cbr_paddr = rxr->hn_br_dma.hv_paddr;
-	cbr.cbr_txsz = NETVSC_DEVICE_RING_BUFFER_SIZE;
-	cbr.cbr_rxsz = NETVSC_DEVICE_RING_BUFFER_SIZE;
+	cbr.cbr_txsz = HN_TXBR_SIZE;
+	cbr.cbr_rxsz = HN_RXBR_SIZE;
 	error = vmbus_chan_open_br(chan, &cbr, NULL, 0, hn_chan_callback, rxr);
 	if (error) {
 		if_printf(sc->hn_ifp, "open chan%u failed: %d\n",

@@ -70,9 +70,6 @@
  * Data types
  */
 
-struct vmbus_channel;
-
-#define NETVSC_DEVICE_RING_BUFFER_SIZE	(128 * PAGE_SIZE)
 #define NETVSC_PACKET_MAXPAGE		32
 
 #define HN_XACT_REQ_PGCNT		2

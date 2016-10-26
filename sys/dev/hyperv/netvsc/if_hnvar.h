@@ -44,6 +44,9 @@
 
 #define HN_PKTBUF_LEN			4096
 
+#define HN_TXBR_SIZE			(128 * PAGE_SIZE)
+#define HN_RXBR_SIZE			(128 * PAGE_SIZE)
+
 struct hn_softc;
 
 struct vmbus_channel;
