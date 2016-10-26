@@ -47,6 +47,11 @@
 #define HN_TXBR_SIZE			(128 * PAGE_SIZE)
 #define HN_RXBR_SIZE			(128 * PAGE_SIZE)
 
+#define HN_XACT_REQ_PGCNT		2
+#define HN_XACT_RESP_PGCNT		2
+#define HN_XACT_REQ_SIZE		(HN_XACT_REQ_PGCNT * PAGE_SIZE)
+#define HN_XACT_RESP_SIZE		(HN_XACT_RESP_PGCNT * PAGE_SIZE)
+
 struct hn_softc;
 
 struct vmbus_channel;

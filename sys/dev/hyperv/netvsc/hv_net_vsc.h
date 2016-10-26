@@ -72,11 +72,6 @@
 
 #define NETVSC_PACKET_MAXPAGE		32
 
-#define HN_XACT_REQ_PGCNT		2
-#define HN_XACT_RESP_PGCNT		2
-#define HN_XACT_REQ_SIZE		(HN_XACT_REQ_PGCNT * PAGE_SIZE)
-#define HN_XACT_RESP_SIZE		(HN_XACT_RESP_PGCNT * PAGE_SIZE)
-
 struct hn_txdesc;
 #ifndef HN_USE_TXDESC_BUFRING
 SLIST_HEAD(hn_txdesc_list, hn_txdesc);
