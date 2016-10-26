@@ -73,6 +73,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/smp.h>
 #include <sys/sysctl.h>
 #include <sys/buf_ring.h>
+#include <sys/taskqueue.h>
 
 #include <net/if.h>
 #include <net/if_arp.h>
@@ -91,6 +92,7 @@ __FBSDID("$FreeBSD$");
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #include <netinet/tcp.h>
+#include <netinet/tcp_lro.h>
 #include <netinet/udp.h>
 #include <netinet/ip6.h>
 
@@ -116,11 +118,14 @@ __FBSDID("$FreeBSD$");
 
 #include <dev/hyperv/include/hyperv.h>
 #include <dev/hyperv/include/hyperv_busdma.h>
+#include <dev/hyperv/include/vmbus.h>
 #include <dev/hyperv/include/vmbus_xact.h>
 
+#include <dev/hyperv/netvsc/ndis.h>
+#include <dev/hyperv/netvsc/if_hnreg.h>
+#include <dev/hyperv/netvsc/if_hnvar.h>
 #include <dev/hyperv/netvsc/hv_net_vsc.h>
 #include <dev/hyperv/netvsc/hv_rndis_filter.h>
-#include <dev/hyperv/netvsc/ndis.h>
 
 #include "vmbus_if.h"
 
