@@ -66,11 +66,7 @@
 
 #define HN_USE_TXDESC_BUFRING
 
-/*
- * Data types
- */
-
-#define NETVSC_PACKET_MAXPAGE		32
+#define HN_GPACNT_MAX			32
 
 struct hn_txdesc;
 #ifndef HN_USE_TXDESC_BUFRING
@@ -150,7 +146,7 @@ struct hn_tx_ring {
 	int		(*hn_sendpkt)(struct hn_tx_ring *, struct hn_txdesc *);
 	int		hn_suspended;
 	int		hn_gpa_cnt;
-	struct vmbus_gpa hn_gpa[NETVSC_PACKET_MAXPAGE];
+	struct vmbus_gpa hn_gpa[HN_GPACNT_MAX];
 
 	u_long		hn_no_txdescs;
 	u_long		hn_send_failed;
