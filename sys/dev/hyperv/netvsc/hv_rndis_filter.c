@@ -1128,10 +1128,6 @@ hn_rndis_conf_rss(struct hn_softc *sc, uint16_t flags)
 	prm->ndis_keyoffset =
 	    __offsetof(struct ndis_rssprm_toeplitz, rss_key[0]);
 
-	if_printf(sc->hn_ifp, "rss size %d, %zu; ind size %u, %zu\n",
-	    rss_size, sizeof(*rss),
-	    prm->ndis_indsize, sizeof(rss->rss_ind));
-
 	error = hn_rndis_set(sc, OID_GEN_RECEIVE_SCALE_PARAMETERS,
 	    rss, rss_size);
 	if (error) {
