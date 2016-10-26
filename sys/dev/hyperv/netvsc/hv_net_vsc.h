@@ -74,9 +74,6 @@
  * Defines
  */
 
-#define NETVSC_RECEIVE_BUFFER_SIZE_LEGACY	(1024*1024*15) /* 15MB */
-#define NETVSC_RECEIVE_BUFFER_SIZE		(1024*1024*16) /* 16MB */
-
 /*
  * Maximum MTU we permit to be configured for a netvsc interface.
  * When the code was developed, a max MTU of 12232 was tested and

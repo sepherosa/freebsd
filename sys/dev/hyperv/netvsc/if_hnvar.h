@@ -36,6 +36,9 @@
 
 #define HN_CHIM_SIZE			(15 * 1024 * 1024)
 
+#define HN_RXBUF_SIZE			(16 * 1024 * 1024)
+#define HN_RXBUF_SIZE_COMPAT		(15 * 1024 * 1024)
+
 struct hn_softc;
 
 struct vmbus_channel;

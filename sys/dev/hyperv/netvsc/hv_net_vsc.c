@@ -138,9 +138,9 @@ hn_nvs_conn_rxbuf(struct hn_softc *sc)
 	 * Limit RXBUF size for old NVS.
 	 */
 	if (sc->hn_nvs_ver <= HN_NVS_VERSION_2)
-		rxbuf_size = NETVSC_RECEIVE_BUFFER_SIZE_LEGACY;
+		rxbuf_size = HN_RXBUF_SIZE_COMPAT;
 	else
-		rxbuf_size = NETVSC_RECEIVE_BUFFER_SIZE;
+		rxbuf_size = HN_RXBUF_SIZE;
 
 	/*
 	 * Connect the RXBUF GPADL to the primary channel.

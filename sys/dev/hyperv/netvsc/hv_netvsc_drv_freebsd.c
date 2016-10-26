@@ -2631,7 +2631,7 @@ hn_create_rx_data(struct hn_softc *sc, int ring_cnt)
 	 *   may further limit the usable space.
 	 */
 	sc->hn_rxbuf = hyperv_dmamem_alloc(bus_get_dma_tag(dev),
-	    PAGE_SIZE, 0, NETVSC_RECEIVE_BUFFER_SIZE, &sc->hn_rxbuf_dma,
+	    PAGE_SIZE, 0, HN_RXBUF_SIZE, &sc->hn_rxbuf_dma,
 	    BUS_DMA_WAITOK | BUS_DMA_ZERO);
 	if (sc->hn_rxbuf == NULL) {
 		device_printf(sc->hn_dev, "allocate rxbuf failed\n");
@@ -4126,7 +4126,7 @@ hn_nvs_handle_rxbuf(struct hn_softc *sc, struct hn_rx_ring *rxr,
 
 		ofs = pkt->cp_rxbuf[i].rb_ofs;
 		len = pkt->cp_rxbuf[i].rb_len;
-		if (__predict_false(ofs + len > NETVSC_RECEIVE_BUFFER_SIZE)) {
+		if (__predict_false(ofs + len > HN_RXBUF_SIZE)) {
 			if_printf(rxr->hn_ifp, "%dth RNDIS msg overflow rxbuf, "
 			    "ofs %d, len %d\n", i, ofs, len);
 			continue;
