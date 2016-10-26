@@ -3740,7 +3740,6 @@ hn_synth_attach(struct hn_softc *sc, int mtu)
 			if_printf(sc->hn_ifp, "setup default RSS indirect "
 			    "table\n");
 		}
-		/* TODO: Take ndis_rss_caps.ndis_nind into account. */
 		for (i = 0; i < NDIS_HASH_INDCNT; ++i)
 			rss->rss_ind[i] = i % nchan;
 		sc->hn_flags |= HN_FLAG_HAS_RSSIND;
