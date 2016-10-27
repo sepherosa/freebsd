@@ -4072,7 +4072,7 @@ hn_rndis_rx_status(struct hn_softc *sc, const void *data, int dlen)
 	}
 }
 
-static void
+static __inline void
 hn_rndis_rxpkt(struct hn_rx_ring *rxr, const void *data, int dlen)
 {
 	const struct rndis_msghdr *hdr;
@@ -4085,7 +4085,7 @@ hn_rndis_rxpkt(struct hn_rx_ring *rxr, const void *data, int dlen)
 
 	if (__predict_true(hdr->rm_type == REMOTE_NDIS_PACKET_MSG)) {
 		/* Hot data path. */
-		hv_rf_receive_data(rxr, data, dlen);
+		hn_rndis_rx_data(rxr, data, dlen);
 		/* Done! */
 		return;
 	}

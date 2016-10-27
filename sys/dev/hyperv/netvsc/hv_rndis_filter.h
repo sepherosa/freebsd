@@ -42,7 +42,7 @@ struct hn_rx_ring;
 
 void hn_rndis_rx_ctrl(struct hn_softc *sc, const void *data, int dlen);
 
-void hv_rf_receive_data(struct hn_rx_ring *rxr,
+void hn_rndis_rx_data(struct hn_rx_ring *rxr,
     const void *data, int dlen);
 
 #endif  /* __HV_RNDIS_FILTER_H__ */

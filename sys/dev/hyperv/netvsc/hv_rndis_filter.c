@@ -59,15 +59,15 @@ __FBSDID("$FreeBSD$");
 #include <dev/hyperv/netvsc/hn_nvs.h>
 #include <dev/hyperv/netvsc/hv_rndis_filter.h>
 
-#define HV_RF_RECVINFO_VLAN	0x1
-#define HV_RF_RECVINFO_CSUM	0x2
-#define HV_RF_RECVINFO_HASHINF	0x4
-#define HV_RF_RECVINFO_HASHVAL	0x8
-#define HV_RF_RECVINFO_ALL		\
-	(HV_RF_RECVINFO_VLAN |		\
-	 HV_RF_RECVINFO_CSUM |		\
-	 HV_RF_RECVINFO_HASHINF |	\
-	 HV_RF_RECVINFO_HASHVAL)
+#define HN_RECVINFO_VLAN		0x0001
+#define HN_RECVINFO_CSUM		0x0002
+#define HN_RECVINFO_HASHINF		0x0004
+#define HN_RECVINFO_HASHVAL		0x0008
+#define HN_RECVINFO_ALL			\
+	(HN_RECVINFO_VLAN |		\
+	 HN_RECVINFO_CSUM |		\
+	 HN_RECVINFO_HASHINF |		\
+	 HN_RECVINFO_HASHVAL)
 
 #define HN_RNDIS_RID_COMPAT_MASK	0xffff
 #define HN_RNDIS_RID_COMPAT_MAX		HN_RNDIS_RID_COMPAT_MASK
@@ -178,35 +178,35 @@ hn_rndis_rxinfo(const void *info_data, int info_dlen, struct hn_recvinfo *info)
 			if (__predict_false(dlen < NDIS_VLAN_INFO_SIZE))
 				return (EINVAL);
 			info->vlan_info = *((const uint32_t *)data);
-			mask |= HV_RF_RECVINFO_VLAN;
+			mask |= HN_RECVINFO_VLAN;
 			break;
 
 		case NDIS_PKTINFO_TYPE_CSUM:
 			if (__predict_false(dlen < NDIS_RXCSUM_INFO_SIZE))
 				return (EINVAL);
 			info->csum_info = *((const uint32_t *)data);
-			mask |= HV_RF_RECVINFO_CSUM;
+			mask |= HN_RECVINFO_CSUM;
 			break;
 
 		case HN_NDIS_PKTINFO_TYPE_HASHVAL:
 			if (__predict_false(dlen < HN_NDIS_HASH_VALUE_SIZE))
 				return (EINVAL);
 			info->hash_value = *((const uint32_t *)data);
-			mask |= HV_RF_RECVINFO_HASHVAL;
+			mask |= HN_RECVINFO_HASHVAL;
 			break;
 
 		case HN_NDIS_PKTINFO_TYPE_HASHINF:
 			if (__predict_false(dlen < HN_NDIS_HASH_INFO_SIZE))
 				return (EINVAL);
 			info->hash_info = *((const uint32_t *)data);
-			mask |= HV_RF_RECVINFO_HASHINF;
+			mask |= HN_RECVINFO_HASHINF;
 			break;
 
 		default:
 			goto next;
 		}
 
-		if (mask == HV_RF_RECVINFO_ALL) {
+		if (mask == HN_RECVINFO_ALL) {
 			/* All found; done */
 			break;
 		}
@@ -219,7 +219,7 @@ next:
 	 * Final fixup.
 	 * - If there is no hash value, invalidate the hash info.
 	 */
-	if ((mask & HV_RF_RECVINFO_HASHVAL) == 0)
+	if ((mask & HN_RECVINFO_HASHVAL) == 0)
 		info->hash_info = HN_NDIS_HASH_INFO_INVALID;
 	return (0);
 }
@@ -238,11 +238,8 @@ hn_rndis_check_overlap(int off, int len, int check_off, int check_len)
 	return (true);
 }
 
-/*
- * RNDIS filter receive data
- */
 void
-hv_rf_receive_data(struct hn_rx_ring *rxr, const void *data, int dlen)
+hn_rndis_rx_data(struct hn_rx_ring *rxr, const void *data, int dlen)
 {
 	const struct rndis_packet_msg *pkt;
 	struct hn_recvinfo info;
