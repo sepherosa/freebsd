@@ -401,6 +401,10 @@ static int hn_set_rxfilter(struct hn_softc *);
 static void hn_link_status_update(struct hn_softc *);
 static void hn_network_change(struct hn_softc *);
 
+static int hn_rndis_rxinfo(const void *, int, struct hn_rxinfo *);
+static void hn_rndis_rx_data(struct hn_rx_ring *, const void *, int);
+static void hn_rndis_rx_status(struct hn_softc *, const void *, int);
+
 static void hn_nvs_handle_notify(struct hn_softc *sc,
 		const struct vmbus_chanpkt_hdr *pkt);
 static void hn_nvs_handle_comp(struct hn_softc *sc, struct vmbus_channel *chan,
