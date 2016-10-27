@@ -166,15 +166,15 @@ __FBSDID("$FreeBSD$");
 
 #define HN_EARLY_TXEOF_THRESH		8
 
-#define HN_RECVINFO_VLAN		0x0001
-#define HN_RECVINFO_CSUM		0x0002
-#define HN_RECVINFO_HASHINF		0x0004
-#define HN_RECVINFO_HASHVAL		0x0008
-#define HN_RECVINFO_ALL			\
-	(HN_RECVINFO_VLAN |		\
-	 HN_RECVINFO_CSUM |		\
-	 HN_RECVINFO_HASHINF |		\
-	 HN_RECVINFO_HASHVAL)
+#define HN_RXINFO_VLAN			0x0001
+#define HN_RXINFO_CSUM			0x0002
+#define HN_RXINFO_HASHINF		0x0004
+#define HN_RXINFO_HASHVAL		0x0008
+#define HN_RXINFO_ALL			\
+	(HN_RXINFO_VLAN |		\
+	 HN_RXINFO_CSUM |		\
+	 HN_RXINFO_HASHINF |		\
+	 HN_RXINFO_HASHVAL)
 
 struct hn_txdesc {
 #ifndef HN_USE_TXDESC_BUFRING
@@ -202,7 +202,7 @@ struct hn_txdesc {
 #define HN_NDIS_RXCSUM_INFO_INVALID	0
 #define HN_NDIS_HASH_INFO_INVALID	0
 
-struct hn_recvinfo {
+struct hn_rxinfo {
 	uint32_t			vlan_info;
 	uint32_t			csum_info;
 	uint32_t			hash_info;
@@ -1640,7 +1640,7 @@ hn_lro_rx(struct lro_ctrl *lc, struct mbuf *m)
 
 static int
 hn_rxpkt(struct hn_rx_ring *rxr, const void *data, int dlen,
-    const struct hn_recvinfo *info)
+    const struct hn_rxinfo *info)
 {
 	struct ifnet *ifp = rxr->hn_ifp;
 	struct mbuf *m_new;
@@ -4088,7 +4088,7 @@ hn_rndis_rx_status(struct hn_softc *sc, const void *data, int dlen)
 }
 
 static int
-hn_rndis_rxinfo(const void *info_data, int info_dlen, struct hn_recvinfo *info)
+hn_rndis_rxinfo(const void *info_data, int info_dlen, struct hn_rxinfo *info)
 {
 	const struct rndis_pktinfo *pi = info_data;
 	uint32_t mask = 0;
@@ -4115,35 +4115,35 @@ hn_rndis_rxinfo(const void *info_data, int info_dlen, struct hn_recvinfo *info)
 			if (__predict_false(dlen < NDIS_VLAN_INFO_SIZE))
 				return (EINVAL);
 			info->vlan_info = *((const uint32_t *)data);
-			mask |= HN_RECVINFO_VLAN;
+			mask |= HN_RXINFO_VLAN;
 			break;
 
 		case NDIS_PKTINFO_TYPE_CSUM:
 			if (__predict_false(dlen < NDIS_RXCSUM_INFO_SIZE))
 				return (EINVAL);
 			info->csum_info = *((const uint32_t *)data);
-			mask |= HN_RECVINFO_CSUM;
+			mask |= HN_RXINFO_CSUM;
 			break;
 
 		case HN_NDIS_PKTINFO_TYPE_HASHVAL:
 			if (__predict_false(dlen < HN_NDIS_HASH_VALUE_SIZE))
 				return (EINVAL);
 			info->hash_value = *((const uint32_t *)data);
-			mask |= HN_RECVINFO_HASHVAL;
+			mask |= HN_RXINFO_HASHVAL;
 			break;
 
 		case HN_NDIS_PKTINFO_TYPE_HASHINF:
 			if (__predict_false(dlen < HN_NDIS_HASH_INFO_SIZE))
 				return (EINVAL);
 			info->hash_info = *((const uint32_t *)data);
-			mask |= HN_RECVINFO_HASHINF;
+			mask |= HN_RXINFO_HASHINF;
 			break;
 
 		default:
 			goto next;
 		}
 
-		if (mask == HN_RECVINFO_ALL) {
+		if (mask == HN_RXINFO_ALL) {
 			/* All found; done */
 			break;
 		}
@@ -4156,7 +4156,7 @@ next:
 	 * Final fixup.
 	 * - If there is no hash value, invalidate the hash info.
 	 */
-	if ((mask & HN_RECVINFO_HASHVAL) == 0)
+	if ((mask & HN_RXINFO_HASHVAL) == 0)
 		info->hash_info = HN_NDIS_HASH_INFO_INVALID;
 	return (0);
 }
@@ -4179,7 +4179,7 @@ static void
 hn_rndis_rx_data(struct hn_rx_ring *rxr, const void *data, int dlen)
 {
 	const struct rndis_packet_msg *pkt;
-	struct hn_recvinfo info;
+	struct hn_rxinfo info;
 	int data_off, pktinfo_off, data_len, pktinfo_len;
 
 	/*
