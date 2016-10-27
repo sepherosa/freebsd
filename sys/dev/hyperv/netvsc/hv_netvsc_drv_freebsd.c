@@ -377,6 +377,8 @@ static void hn_link_status(struct hn_softc *);
 static int hn_sendpkt_rndis_sglist(struct hn_tx_ring *, struct hn_txdesc *);
 static int hn_sendpkt_rndis_chim(struct hn_tx_ring *, struct hn_txdesc *);
 static int hn_set_rxfilter(struct hn_softc *);
+static void hn_link_status_update(struct hn_softc *);
+static void hn_network_change(struct hn_softc *);
 
 static void hn_nvs_handle_notify(struct hn_softc *sc,
 		const struct vmbus_chanpkt_hdr *pkt);
@@ -1006,7 +1008,7 @@ hn_netchg_status_taskfunc(void *xsc, int pending __unused)
 	hn_link_status(sc);
 }
 
-void
+static void
 hn_link_status_update(struct hn_softc *sc)
 {
 
@@ -1014,7 +1016,7 @@ hn_link_status_update(struct hn_softc *sc)
 		taskqueue_enqueue(sc->hn_mgmt_taskq, &sc->hn_link_task);
 }
 
-void
+static void
 hn_network_change(struct hn_softc *sc)
 {
 
@@ -4025,6 +4027,51 @@ hn_resume(struct hn_softc *sc)
 	hn_resume_mgmt(sc);
 }
 
+static void 
+hn_rndis_rx_status(struct hn_softc *sc, const void *data, int dlen)
+{
+	const struct rndis_status_msg *msg;
+	int ofs;
+
+	if (dlen < sizeof(*msg)) {
+		if_printf(sc->hn_ifp, "invalid RNDIS status\n");
+		return;
+	}
+	msg = data;
+
+	switch (msg->rm_status) {
+	case RNDIS_STATUS_MEDIA_CONNECT:
+	case RNDIS_STATUS_MEDIA_DISCONNECT:
+		hn_link_status_update(sc);
+		break;
+
+	case RNDIS_STATUS_TASK_OFFLOAD_CURRENT_CONFIG:
+		/* Not really useful; ignore. */
+		break;
+
+	case RNDIS_STATUS_NETWORK_CHANGE:
+		ofs = RNDIS_STBUFOFFSET_ABS(msg->rm_stbufoffset);
+		if (dlen < ofs + msg->rm_stbuflen ||
+		    msg->rm_stbuflen < sizeof(uint32_t)) {
+			if_printf(sc->hn_ifp, "network changed\n");
+		} else {
+			uint32_t change;
+
+			memcpy(&change, ((const uint8_t *)msg) + ofs,
+			    sizeof(change));
+			if_printf(sc->hn_ifp, "network changed, change %u\n",
+			    change);
+		}
+		hn_network_change(sc);
+		break;
+
+	default:
+		if_printf(sc->hn_ifp, "unknown RNDIS status 0x%08x\n",
+		    msg->rm_status);
+		break;
+	}
+}
+
 static void
 hn_rndis_rxpkt(struct hn_rx_ring *rxr, const void *data, int dlen)
 {
@@ -4043,12 +4090,10 @@ hn_rndis_rxpkt(struct hn_rx_ring *rxr, const void *data, int dlen)
 		return;
 	}
 
-	if (hdr->rm_type == REMOTE_NDIS_INDICATE_STATUS_MSG) {
-		hv_rf_receive_indicate_status(rxr->hn_ifp->if_softc,
-		    data, dlen);
-	} else {
+	if (hdr->rm_type == REMOTE_NDIS_INDICATE_STATUS_MSG)
+		hn_rndis_rx_status(rxr->hn_ifp->if_softc, data, dlen);
+	else
 		hn_rndis_rx_ctrl(rxr->hn_ifp->if_softc, data, dlen);
-	}
 }
 
 static void

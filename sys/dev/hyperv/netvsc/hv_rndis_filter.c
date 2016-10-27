@@ -150,55 +150,6 @@ hn_rndis_pktinfo_append(struct rndis_packet_msg *pkt, size_t pktsize,
 	return (pi->rm_data);
 }
 
-/*
- * RNDIS filter receive indicate status
- */
-void 
-hv_rf_receive_indicate_status(struct hn_softc *sc, const void *data, int dlen)
-{
-	const struct rndis_status_msg *msg;
-	int ofs;
-
-	if (dlen < sizeof(*msg)) {
-		if_printf(sc->hn_ifp, "invalid RNDIS status\n");
-		return;
-	}
-	msg = data;
-
-	switch (msg->rm_status) {
-	case RNDIS_STATUS_MEDIA_CONNECT:
-	case RNDIS_STATUS_MEDIA_DISCONNECT:
-		hn_link_status_update(sc);
-		break;
-
-	case RNDIS_STATUS_TASK_OFFLOAD_CURRENT_CONFIG:
-		/* Not really useful; ignore. */
-		break;
-
-	case RNDIS_STATUS_NETWORK_CHANGE:
-		ofs = RNDIS_STBUFOFFSET_ABS(msg->rm_stbufoffset);
-		if (dlen < ofs + msg->rm_stbuflen ||
-		    msg->rm_stbuflen < sizeof(uint32_t)) {
-			if_printf(sc->hn_ifp, "network changed\n");
-		} else {
-			uint32_t change;
-
-			memcpy(&change, ((const uint8_t *)msg) + ofs,
-			    sizeof(change));
-			if_printf(sc->hn_ifp, "network changed, change %u\n",
-			    change);
-		}
-		hn_network_change(sc);
-		break;
-
-	default:
-		/* TODO: */
-		if_printf(sc->hn_ifp, "unknown RNDIS status 0x%08x\n",
-		    msg->rm_status);
-		break;
-	}
-}
-
 static int
 hn_rndis_rxinfo(const void *info_data, int info_dlen, struct hn_recvinfo *info)
 {

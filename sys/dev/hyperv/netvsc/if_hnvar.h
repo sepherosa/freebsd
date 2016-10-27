@@ -258,7 +258,5 @@ int		hn_rndis_set_rxfilter(struct hn_softc *sc, uint32_t filter);
 
 int		hn_rxpkt(struct hn_rx_ring *rxr, const void *data, int dlen,
 		    const struct hn_recvinfo *info);
-void		hn_link_status_update(struct hn_softc *sc);
-void		hn_network_change(struct hn_softc *sc);
 
 #endif	/* !_IF_HNVAR_H_ */
