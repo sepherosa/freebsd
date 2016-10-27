@@ -166,6 +166,16 @@ __FBSDID("$FreeBSD$");
 
 #define HN_EARLY_TXEOF_THRESH		8
 
+#define HN_RECVINFO_VLAN		0x0001
+#define HN_RECVINFO_CSUM		0x0002
+#define HN_RECVINFO_HASHINF		0x0004
+#define HN_RECVINFO_HASHVAL		0x0008
+#define HN_RECVINFO_ALL			\
+	(HN_RECVINFO_VLAN |		\
+	 HN_RECVINFO_CSUM |		\
+	 HN_RECVINFO_HASHINF |		\
+	 HN_RECVINFO_HASHVAL)
+
 struct hn_txdesc {
 #ifndef HN_USE_TXDESC_BUFRING
 	SLIST_ENTRY(hn_txdesc) link;
@@ -187,6 +197,17 @@ struct hn_txdesc {
 
 #define HN_TXD_FLAG_ONLIST	0x1
 #define HN_TXD_FLAG_DMAMAP	0x2
+
+#define HN_NDIS_VLAN_INFO_INVALID	0xffffffff
+#define HN_NDIS_RXCSUM_INFO_INVALID	0
+#define HN_NDIS_HASH_INFO_INVALID	0
+
+struct hn_recvinfo {
+	uint32_t			vlan_info;
+	uint32_t			csum_info;
+	uint32_t			hash_info;
+	uint32_t			hash_value;
+};
 
 #define HN_LRO_LENLIM_MULTIRX_DEF	(12 * ETHERMTU)
 #define HN_LRO_LENLIM_DEF		(25 * ETHERMTU)
@@ -1617,13 +1638,7 @@ hn_lro_rx(struct lro_ctrl *lc, struct mbuf *m)
 }
 #endif
 
-/*
- * Called when we receive a data packet from the "wire" on the
- * specified device
- *
- * Note:  This is no longer used as a callback
- */
-int
+static int
 hn_rxpkt(struct hn_rx_ring *rxr, const void *data, int dlen,
     const struct hn_recvinfo *info)
 {
@@ -4070,6 +4085,256 @@ hn_rndis_rx_status(struct hn_softc *sc, const void *data, int dlen)
 		    msg->rm_status);
 		break;
 	}
+}
+
+static int
+hn_rndis_rxinfo(const void *info_data, int info_dlen, struct hn_recvinfo *info)
+{
+	const struct rndis_pktinfo *pi = info_data;
+	uint32_t mask = 0;
+
+	while (info_dlen != 0) {
+		const void *data;
+		uint32_t dlen;
+
+		if (__predict_false(info_dlen < sizeof(*pi)))
+			return (EINVAL);
+		if (__predict_false(info_dlen < pi->rm_size))
+			return (EINVAL);
+		info_dlen -= pi->rm_size;
+
+		if (__predict_false(pi->rm_size & RNDIS_PKTINFO_SIZE_ALIGNMASK))
+			return (EINVAL);
+		if (__predict_false(pi->rm_size < pi->rm_pktinfooffset))
+			return (EINVAL);
+		dlen = pi->rm_size - pi->rm_pktinfooffset;
+		data = pi->rm_data;
+
+		switch (pi->rm_type) {
+		case NDIS_PKTINFO_TYPE_VLAN:
+			if (__predict_false(dlen < NDIS_VLAN_INFO_SIZE))
+				return (EINVAL);
+			info->vlan_info = *((const uint32_t *)data);
+			mask |= HN_RECVINFO_VLAN;
+			break;
+
+		case NDIS_PKTINFO_TYPE_CSUM:
+			if (__predict_false(dlen < NDIS_RXCSUM_INFO_SIZE))
+				return (EINVAL);
+			info->csum_info = *((const uint32_t *)data);
+			mask |= HN_RECVINFO_CSUM;
+			break;
+
+		case HN_NDIS_PKTINFO_TYPE_HASHVAL:
+			if (__predict_false(dlen < HN_NDIS_HASH_VALUE_SIZE))
+				return (EINVAL);
+			info->hash_value = *((const uint32_t *)data);
+			mask |= HN_RECVINFO_HASHVAL;
+			break;
+
+		case HN_NDIS_PKTINFO_TYPE_HASHINF:
+			if (__predict_false(dlen < HN_NDIS_HASH_INFO_SIZE))
+				return (EINVAL);
+			info->hash_info = *((const uint32_t *)data);
+			mask |= HN_RECVINFO_HASHINF;
+			break;
+
+		default:
+			goto next;
+		}
+
+		if (mask == HN_RECVINFO_ALL) {
+			/* All found; done */
+			break;
+		}
+next:
+		pi = (const struct rndis_pktinfo *)
+		    ((const uint8_t *)pi + pi->rm_size);
+	}
+
+	/*
+	 * Final fixup.
+	 * - If there is no hash value, invalidate the hash info.
+	 */
+	if ((mask & HN_RECVINFO_HASHVAL) == 0)
+		info->hash_info = HN_NDIS_HASH_INFO_INVALID;
+	return (0);
+}
+
+static __inline bool
+hn_rndis_check_overlap(int off, int len, int check_off, int check_len)
+{
+
+	if (off < check_off) {
+		if (__predict_true(off + len <= check_off))
+			return (false);
+	} else if (off > check_off) {
+		if (__predict_true(check_off + check_len <= off))
+			return (false);
+	}
+	return (true);
+}
+
+static void
+hn_rndis_rx_data(struct hn_rx_ring *rxr, const void *data, int dlen)
+{
+	const struct rndis_packet_msg *pkt;
+	struct hn_recvinfo info;
+	int data_off, pktinfo_off, data_len, pktinfo_len;
+
+	/*
+	 * Check length.
+	 */
+	if (__predict_false(dlen < sizeof(*pkt))) {
+		if_printf(rxr->hn_ifp, "invalid RNDIS packet msg\n");
+		return;
+	}
+	pkt = data;
+
+	if (__predict_false(dlen < pkt->rm_len)) {
+		if_printf(rxr->hn_ifp, "truncated RNDIS packet msg, "
+		    "dlen %d, msglen %u\n", dlen, pkt->rm_len);
+		return;
+	}
+	if (__predict_false(pkt->rm_len <
+	    pkt->rm_datalen + pkt->rm_oobdatalen + pkt->rm_pktinfolen)) {
+		if_printf(rxr->hn_ifp, "invalid RNDIS packet msglen, "
+		    "msglen %u, data %u, oob %u, pktinfo %u\n",
+		    pkt->rm_len, pkt->rm_datalen, pkt->rm_oobdatalen,
+		    pkt->rm_pktinfolen);
+		return;
+	}
+	if (__predict_false(pkt->rm_datalen == 0)) {
+		if_printf(rxr->hn_ifp, "invalid RNDIS packet msg, no data\n");
+		return;
+	}
+
+	/*
+	 * Check offests.
+	 */
+#define IS_OFFSET_INVALID(ofs)			\
+	((ofs) < RNDIS_PACKET_MSG_OFFSET_MIN ||	\
+	 ((ofs) & RNDIS_PACKET_MSG_OFFSET_ALIGNMASK))
+
+	/* XXX Hyper-V does not meet data offset alignment requirement */
+	if (__predict_false(pkt->rm_dataoffset < RNDIS_PACKET_MSG_OFFSET_MIN)) {
+		if_printf(rxr->hn_ifp, "invalid RNDIS packet msg, "
+		    "data offset %u\n", pkt->rm_dataoffset);
+		return;
+	}
+	if (__predict_false(pkt->rm_oobdataoffset > 0 &&
+	    IS_OFFSET_INVALID(pkt->rm_oobdataoffset))) {
+		if_printf(rxr->hn_ifp, "invalid RNDIS packet msg, "
+		    "oob offset %u\n", pkt->rm_oobdataoffset);
+		return;
+	}
+	if (__predict_true(pkt->rm_pktinfooffset > 0) &&
+	    __predict_false(IS_OFFSET_INVALID(pkt->rm_pktinfooffset))) {
+		if_printf(rxr->hn_ifp, "invalid RNDIS packet msg, "
+		    "pktinfo offset %u\n", pkt->rm_pktinfooffset);
+		return;
+	}
+
+#undef IS_OFFSET_INVALID
+
+	data_off = RNDIS_PACKET_MSG_OFFSET_ABS(pkt->rm_dataoffset);
+	data_len = pkt->rm_datalen;
+	pktinfo_off = RNDIS_PACKET_MSG_OFFSET_ABS(pkt->rm_pktinfooffset);
+	pktinfo_len = pkt->rm_pktinfolen;
+
+	/*
+	 * Check OOB coverage.
+	 */
+	if (__predict_false(pkt->rm_oobdatalen != 0)) {
+		int oob_off, oob_len;
+
+		if_printf(rxr->hn_ifp, "got oobdata\n");
+		oob_off = RNDIS_PACKET_MSG_OFFSET_ABS(pkt->rm_oobdataoffset);
+		oob_len = pkt->rm_oobdatalen;
+
+		if (__predict_false(oob_off + oob_len > pkt->rm_len)) {
+			if_printf(rxr->hn_ifp, "invalid RNDIS packet msg, "
+			    "oob overflow, msglen %u, oob abs %d len %d\n",
+			    pkt->rm_len, oob_off, oob_len);
+			return;
+		}
+
+		/*
+		 * Check against data.
+		 */
+		if (hn_rndis_check_overlap(oob_off, oob_len,
+		    data_off, data_len)) {
+			if_printf(rxr->hn_ifp, "invalid RNDIS packet msg, "
+			    "oob overlaps data, oob abs %d len %d, "
+			    "data abs %d len %d\n",
+			    oob_off, oob_len, data_off, data_len);
+			return;
+		}
+
+		/*
+		 * Check against pktinfo.
+		 */
+		if (pktinfo_len != 0 &&
+		    hn_rndis_check_overlap(oob_off, oob_len,
+		    pktinfo_off, pktinfo_len)) {
+			if_printf(rxr->hn_ifp, "invalid RNDIS packet msg, "
+			    "oob overlaps pktinfo, oob abs %d len %d, "
+			    "pktinfo abs %d len %d\n",
+			    oob_off, oob_len, pktinfo_off, pktinfo_len);
+			return;
+		}
+	}
+
+	/*
+	 * Check per-packet-info coverage and find useful per-packet-info.
+	 */
+	info.vlan_info = HN_NDIS_VLAN_INFO_INVALID;
+	info.csum_info = HN_NDIS_RXCSUM_INFO_INVALID;
+	info.hash_info = HN_NDIS_HASH_INFO_INVALID;
+	if (__predict_true(pktinfo_len != 0)) {
+		bool overlap;
+		int error;
+
+		if (__predict_false(pktinfo_off + pktinfo_len > pkt->rm_len)) {
+			if_printf(rxr->hn_ifp, "invalid RNDIS packet msg, "
+			    "pktinfo overflow, msglen %u, "
+			    "pktinfo abs %d len %d\n",
+			    pkt->rm_len, pktinfo_off, pktinfo_len);
+			return;
+		}
+
+		/*
+		 * Check packet info coverage.
+		 */
+		overlap = hn_rndis_check_overlap(pktinfo_off, pktinfo_len,
+		    data_off, data_len);
+		if (__predict_false(overlap)) {
+			if_printf(rxr->hn_ifp, "invalid RNDIS packet msg, "
+			    "pktinfo overlap data, pktinfo abs %d len %d, "
+			    "data abs %d len %d\n",
+			    pktinfo_off, pktinfo_len, data_off, data_len);
+			return;
+		}
+
+		/*
+		 * Find useful per-packet-info.
+		 */
+		error = hn_rndis_rxinfo(((const uint8_t *)pkt) + pktinfo_off,
+		    pktinfo_len, &info);
+		if (__predict_false(error)) {
+			if_printf(rxr->hn_ifp, "invalid RNDIS packet msg "
+			    "pktinfo\n");
+			return;
+		}
+	}
+
+	if (__predict_false(data_off + data_len > pkt->rm_len)) {
+		if_printf(rxr->hn_ifp, "invalid RNDIS packet msg, "
+		    "data overflow, msglen %u, data abs %d len %d\n",
+		    pkt->rm_len, data_off, data_len);
+		return;
+	}
+	hn_rxpkt(rxr, ((const uint8_t *)pkt) + data_off, data_len, &info);
 }
 
 static __inline void
