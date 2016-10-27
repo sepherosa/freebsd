@@ -382,7 +382,7 @@ static void hn_nvs_handle_notify(struct hn_softc *sc,
 		const struct vmbus_chanpkt_hdr *pkt);
 static void hn_nvs_handle_comp(struct hn_softc *sc, struct vmbus_channel *chan,
 		const struct vmbus_chanpkt_hdr *pkt);
-static void hn_nvs_handle_rxbuf(struct hn_softc *sc, struct hn_rx_ring *rxr,
+static void hn_nvs_handle_rxbuf(struct hn_rx_ring *rxr,
 		struct vmbus_channel *chan,
 		const struct vmbus_chanpkt_hdr *pkthdr);
 static void hn_nvs_ack_rxbuf(struct vmbus_channel *chan, uint64_t tid);
@@ -4026,6 +4026,32 @@ hn_resume(struct hn_softc *sc)
 }
 
 static void
+hn_rndis_rxpkt(struct hn_rx_ring *rxr, const void *data, int dlen)
+{
+	const struct rndis_msghdr *hdr;
+
+	if (__predict_false(dlen < sizeof(*hdr))) {
+		if_printf(rxr->hn_ifp, "invalid RNDIS msg\n");
+		return;
+	}
+	hdr = data;
+
+	if (__predict_true(hdr->rm_type == REMOTE_NDIS_PACKET_MSG)) {
+		/* Hot data path. */
+		hv_rf_receive_data(rxr, data, dlen);
+		/* Done! */
+		return;
+	}
+
+	if (hdr->rm_type == REMOTE_NDIS_INDICATE_STATUS_MSG) {
+		hv_rf_receive_indicate_status(rxr->hn_ifp->if_softc,
+		    data, dlen);
+	} else {
+		hn_rndis_rx_ctrl(rxr->hn_ifp->if_softc, data, dlen);
+	}
+}
+
+static void
 hn_nvs_handle_notify(struct hn_softc *sc, const struct vmbus_chanpkt_hdr *pkt)
 {
 	const struct hn_nvs_hdr *hdr;
@@ -4060,8 +4086,8 @@ hn_nvs_handle_comp(struct hn_softc *sc, struct vmbus_channel *chan,
 }
 
 static void
-hn_nvs_handle_rxbuf(struct hn_softc *sc, struct hn_rx_ring *rxr,
-    struct vmbus_channel *chan, const struct vmbus_chanpkt_hdr *pkthdr)
+hn_nvs_handle_rxbuf(struct hn_rx_ring *rxr, struct vmbus_channel *chan,
+    const struct vmbus_chanpkt_hdr *pkthdr)
 {
 	const struct vmbus_chanpkt_rxbuf *pkt;
 	const struct hn_nvs_hdr *nvs_hdr;
@@ -4111,9 +4137,9 @@ hn_nvs_handle_rxbuf(struct hn_softc *sc, struct hn_rx_ring *rxr,
 			    "ofs %d, len %d\n", i, ofs, len);
 			continue;
 		}
-		hv_rf_on_receive(sc, rxr, rxr->hn_rxbuf + ofs, len);
+		hn_rndis_rxpkt(rxr, rxr->hn_rxbuf + ofs, len);
 	}
-	
+
 	/*
 	 * Moved completion call back here so that all received 
 	 * messages (not just data messages) will trigger a response
@@ -4177,7 +4203,7 @@ hn_chan_callback(struct vmbus_channel *chan, void *xrxr)
 				hn_nvs_handle_comp(sc, chan, pkt);
 				break;
 			case VMBUS_CHANPKT_TYPE_RXBUF:
-				hn_nvs_handle_rxbuf(sc, rxr, chan, pkt);
+				hn_nvs_handle_rxbuf(rxr, chan, pkt);
 				break;
 			case VMBUS_CHANPKT_TYPE_INBAND:
 				hn_nvs_handle_notify(sc, pkt);
