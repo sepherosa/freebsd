@@ -226,6 +226,15 @@ static int			hn_attach(device_t);
 static int			hn_detach(device_t);
 static int			hn_shutdown(device_t);
 
+static void			hn_init(void *);
+static int			hn_ioctl(struct ifnet *, u_long, caddr_t);
+static void			hn_start(struct ifnet *);
+static int			hn_transmit(struct ifnet *, struct mbuf *);
+static void			hn_xmit_qflush(struct ifnet *);
+static int			hn_ifmedia_upd(struct ifnet *);
+static void			hn_ifmedia_sts(struct ifnet *,
+				    struct ifmediareq *);
+
 SYSCTL_NODE(_hw, OID_AUTO, hn, CTLFLAG_RD | CTLFLAG_MPSAFE, NULL,
     "Hyper-V network interface");
 
@@ -317,13 +326,10 @@ static struct taskqueue	*hn_tx_taskq;
 
 static void hn_stop(struct hn_softc *sc);
 static void hn_init_locked(struct hn_softc *sc);
-static void hn_init(void *xsc);
-static int  hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data);
+
 static int hn_start_locked(struct hn_tx_ring *txr, int len);
-static void hn_start(struct ifnet *ifp);
 static void hn_start_txeof(struct hn_tx_ring *);
-static int hn_ifmedia_upd(struct ifnet *ifp);
-static void hn_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr);
+
 #if __FreeBSD_version >= 1100099
 static int hn_lro_lenlim_sysctl(SYSCTL_HANDLER_ARGS);
 static int hn_lro_ackcnt_sysctl(SYSCTL_HANDLER_ARGS);
@@ -345,14 +351,17 @@ static int hn_rxfilter_sysctl(SYSCTL_HANDLER_ARGS);
 static int hn_rss_key_sysctl(SYSCTL_HANDLER_ARGS);
 static int hn_rss_ind_sysctl(SYSCTL_HANDLER_ARGS);
 static int hn_rss_hash_sysctl(SYSCTL_HANDLER_ARGS);
+
 static int hn_check_iplen(const struct mbuf *, int);
 static int hn_create_tx_ring(struct hn_softc *, int);
 static void hn_destroy_tx_ring(struct hn_tx_ring *);
 static int hn_create_tx_data(struct hn_softc *, int);
 static void hn_fixup_tx_data(struct hn_softc *);
 static void hn_destroy_tx_data(struct hn_softc *);
+
 static void hn_start_taskfunc(void *, int);
 static void hn_start_txeof_taskfunc(void *, int);
+
 static void hn_link_taskfunc(void *, int);
 static void hn_netchg_init_taskfunc(void *, int);
 static void hn_netchg_status_taskfunc(void *, int);
@@ -402,8 +411,7 @@ static void hn_nvs_handle_rxbuf(struct hn_rx_ring *rxr,
 static void hn_nvs_ack_rxbuf(struct hn_rx_ring *, struct vmbus_channel *,
 		uint64_t);
 
-static int hn_transmit(struct ifnet *, struct mbuf *);
-static void hn_xmit_qflush(struct ifnet *);
+
 static int hn_xmit(struct hn_tx_ring *, int);
 static void hn_xmit_txeof(struct hn_tx_ring *);
 static void hn_xmit_taskfunc(void *, int);
