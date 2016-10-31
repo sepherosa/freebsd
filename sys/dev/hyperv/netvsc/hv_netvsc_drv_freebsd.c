@@ -340,92 +340,101 @@ SYSCTL_NODE(_hw, OID_AUTO, hn, CTLFLAG_RD | CTLFLAG_MPSAFE, NULL,
     "Hyper-V network interface");
 
 /* Trust tcp segements verification on host side. */
-static int hn_trust_hosttcp = 1;
+static int			hn_trust_hosttcp = 1;
 SYSCTL_INT(_hw_hn, OID_AUTO, trust_hosttcp, CTLFLAG_RDTUN,
     &hn_trust_hosttcp, 0,
     "Trust tcp segement verification on host side, "
     "when csum info is missing (global setting)");
 
 /* Trust udp datagrams verification on host side. */
-static int hn_trust_hostudp = 1;
+static int			hn_trust_hostudp = 1;
 SYSCTL_INT(_hw_hn, OID_AUTO, trust_hostudp, CTLFLAG_RDTUN,
     &hn_trust_hostudp, 0,
     "Trust udp datagram verification on host side, "
     "when csum info is missing (global setting)");
 
 /* Trust ip packets verification on host side. */
-static int hn_trust_hostip = 1;
+static int			hn_trust_hostip = 1;
 SYSCTL_INT(_hw_hn, OID_AUTO, trust_hostip, CTLFLAG_RDTUN,
     &hn_trust_hostip, 0,
     "Trust ip packet verification on host side, "
     "when csum info is missing (global setting)");
 
 /* Limit TSO burst size */
-static int hn_tso_maxlen = IP_MAXPACKET;
+static int			hn_tso_maxlen = IP_MAXPACKET;
 SYSCTL_INT(_hw_hn, OID_AUTO, tso_maxlen, CTLFLAG_RDTUN,
     &hn_tso_maxlen, 0, "TSO burst limit");
 
 /* Limit chimney send size */
-static int hn_tx_chimney_size = 0;
+static int			hn_tx_chimney_size = 0;
 SYSCTL_INT(_hw_hn, OID_AUTO, tx_chimney_size, CTLFLAG_RDTUN,
     &hn_tx_chimney_size, 0, "Chimney send packet size limit");
 
 /* Limit the size of packet for direct transmission */
-static int hn_direct_tx_size = HN_DIRECT_TX_SIZE_DEF;
+static int			hn_direct_tx_size = HN_DIRECT_TX_SIZE_DEF;
 SYSCTL_INT(_hw_hn, OID_AUTO, direct_tx_size, CTLFLAG_RDTUN,
     &hn_direct_tx_size, 0, "Size of the packet for direct transmission");
 
+/* # of LRO entries per RX ring */
 #if defined(INET) || defined(INET6)
 #if __FreeBSD_version >= 1100095
-static int hn_lro_entry_count = HN_LROENT_CNT_DEF;
+static int			hn_lro_entry_count = HN_LROENT_CNT_DEF;
 SYSCTL_INT(_hw_hn, OID_AUTO, lro_entry_count, CTLFLAG_RDTUN,
     &hn_lro_entry_count, 0, "LRO entry count");
 #endif
 #endif
 
-static int hn_share_tx_taskq = 0;
+/* Use shared TX taskqueue */
+static int			hn_share_tx_taskq = 0;
 SYSCTL_INT(_hw_hn, OID_AUTO, share_tx_taskq, CTLFLAG_RDTUN,
     &hn_share_tx_taskq, 0, "Enable shared TX taskqueue");
 
 #ifndef HN_USE_TXDESC_BUFRING
-static int hn_use_txdesc_bufring = 0;
+static int			hn_use_txdesc_bufring = 0;
 #else
-static int hn_use_txdesc_bufring = 1;
+static int			hn_use_txdesc_bufring = 1;
 #endif
 SYSCTL_INT(_hw_hn, OID_AUTO, use_txdesc_bufring, CTLFLAG_RD,
     &hn_use_txdesc_bufring, 0, "Use buf_ring for TX descriptors");
 
-static int hn_bind_tx_taskq = -1;
+/* Bind TX taskqueue to the target CPU */
+static int			hn_bind_tx_taskq = -1;
 SYSCTL_INT(_hw_hn, OID_AUTO, bind_tx_taskq, CTLFLAG_RDTUN,
     &hn_bind_tx_taskq, 0, "Bind TX taskqueue to the specified cpu");
 
-static int hn_use_if_start = 0;
+/* Use ifnet.if_start instead of ifnet.if_transmit */
+static int			hn_use_if_start = 0;
 SYSCTL_INT(_hw_hn, OID_AUTO, use_if_start, CTLFLAG_RDTUN,
     &hn_use_if_start, 0, "Use if_start TX method");
 
-static int hn_chan_cnt = 0;
+/* # of channels to use */
+static int			hn_chan_cnt = 0;
 SYSCTL_INT(_hw_hn, OID_AUTO, chan_cnt, CTLFLAG_RDTUN,
     &hn_chan_cnt, 0,
     "# of channels to use; each channel has one RX ring and one TX ring");
 
-static int hn_tx_ring_cnt = 0;
+/* # of transmit rings to use */
+static int			hn_tx_ring_cnt = 0;
 SYSCTL_INT(_hw_hn, OID_AUTO, tx_ring_cnt, CTLFLAG_RDTUN,
     &hn_tx_ring_cnt, 0, "# of TX rings to use");
 
-static int hn_tx_swq_depth = 0;
+/* Software TX ring deptch */
+static int			hn_tx_swq_depth = 0;
 SYSCTL_INT(_hw_hn, OID_AUTO, tx_swq_depth, CTLFLAG_RDTUN,
     &hn_tx_swq_depth, 0, "Depth of IFQ or BUFRING");
 
+/* Enable sorted LRO, and the depth of the per-channel mbuf queue */
 #if __FreeBSD_version >= 1100095
-static u_int hn_lro_mbufq_depth = 0;
+static u_int			hn_lro_mbufq_depth = 0;
 SYSCTL_UINT(_hw_hn, OID_AUTO, lro_mbufq_depth, CTLFLAG_RDTUN,
     &hn_lro_mbufq_depth, 0, "Depth of LRO mbuf queue");
 #endif
 
-static u_int hn_cpu_index;
-static struct taskqueue	*hn_tx_taskq;
+static u_int			hn_cpu_index;	/* next CPU for channel */
+static struct taskqueue		*hn_tx_taskq;	/* shared TX taskqueue */
 
-static const uint8_t	hn_rss_key_default[NDIS_HASH_KEYSIZE_TOEPLITZ] = {
+static const uint8_t
+hn_rss_key_default[NDIS_HASH_KEYSIZE_TOEPLITZ] = {
 	0x6d, 0x5a, 0x56, 0xda, 0x25, 0x5b, 0x0e, 0xc2,
 	0x41, 0x67, 0x25, 0x3d, 0x43, 0xa3, 0x8f, 0xb0,
 	0xd0, 0xca, 0x2b, 0xcb, 0xae, 0x7b, 0x30, 0xb4,
