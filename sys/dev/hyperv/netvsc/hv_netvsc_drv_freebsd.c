@@ -180,25 +180,25 @@ __FBSDID("$FreeBSD$");
 
 struct hn_txdesc {
 #ifndef HN_USE_TXDESC_BUFRING
-	SLIST_ENTRY(hn_txdesc) link;
+	SLIST_ENTRY(hn_txdesc)		link;
 #endif
-	struct mbuf	*m;
-	struct hn_tx_ring *txr;
-	int		refs;
-	uint32_t	flags;		/* HN_TXD_FLAG_ */
-	struct hn_nvs_sendctx send_ctx;
-	uint32_t	chim_index;
-	int		chim_size;
+	struct mbuf			*m;
+	struct hn_tx_ring		*txr;
+	int				refs;
+	uint32_t			flags;	/* HN_TXD_FLAG_ */
+	struct hn_nvs_sendctx		send_ctx;
+	uint32_t			chim_index;
+	int				chim_size;
 
-	bus_dmamap_t	data_dmap;
+	bus_dmamap_t			data_dmap;
 
-	bus_addr_t	rndis_pkt_paddr;
-	struct rndis_packet_msg *rndis_pkt;
-	bus_dmamap_t	rndis_pkt_dmap;
+	bus_addr_t			rndis_pkt_paddr;
+	struct rndis_packet_msg		*rndis_pkt;
+	bus_dmamap_t			rndis_pkt_dmap;
 };
 
-#define HN_TXD_FLAG_ONLIST	0x1
-#define HN_TXD_FLAG_DMAMAP	0x2
+#define HN_TXD_FLAG_ONLIST		0x0001
+#define HN_TXD_FLAG_DMAMAP		0x0002
 
 struct hn_rxinfo {
 	uint32_t			vlan_info;
