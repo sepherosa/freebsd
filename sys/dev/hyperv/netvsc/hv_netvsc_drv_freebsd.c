@@ -129,23 +129,10 @@ __FBSDID("$FreeBSD$");
 
 #include "vmbus_if.h"
 
-/* Short for Hyper-V network interface */
-#define NETVSC_DEVNAME    "hn"
-
-/*
- * It looks like offset 0 of buf is reserved to hold the softc pointer.
- * The sc pointer evidently not needed, and is not presently populated.
- * The packet offset is where the netvsc_packet starts in the buffer.
- */
-#define HV_NV_SC_PTR_OFFSET_IN_BUF         0
-#define HV_NV_PACKET_OFFSET_IN_BUF         16
+#define HN_RING_CNT_DEF_MAX		8
 
 /* YYY should get it from the underlying channel */
 #define HN_TX_DESC_CNT			512
-
-#define HN_LROENT_CNT_DEF		128
-
-#define HN_RING_CNT_DEF_MAX		8
 
 #define HN_RNDIS_PKT_LEN					\
 	(sizeof(struct rndis_packet_msg) +			\
@@ -166,17 +153,30 @@ __FBSDID("$FreeBSD$");
 
 #define HN_EARLY_TXEOF_THRESH		8
 
-#define HN_RXINFO_VLAN			0x0001
-#define HN_RXINFO_CSUM			0x0002
-#define HN_RXINFO_HASHINF		0x0004
-#define HN_RXINFO_HASHVAL		0x0008
-#define HN_RXINFO_ALL			\
-	(HN_RXINFO_VLAN |		\
-	 HN_RXINFO_CSUM |		\
-	 HN_RXINFO_HASHINF |		\
-	 HN_RXINFO_HASHVAL)
-
 #define HN_PKTBUF_LEN_DEF		(16 * 1024)
+
+#define HN_LROENT_CNT_DEF		128
+
+#define HN_LRO_LENLIM_MULTIRX_DEF	(12 * ETHERMTU)
+#define HN_LRO_LENLIM_DEF		(25 * ETHERMTU)
+/* YYY 2*MTU is a bit rough, but should be good enough. */
+#define HN_LRO_LENLIM_MIN(ifp)		(2 * (ifp)->if_mtu)
+
+#define HN_LRO_ACKCNT_DEF		1
+
+#define HN_LOCK_INIT(sc)		\
+	sx_init(&(sc)->hn_lock, device_get_nameunit((sc)->hn_dev))
+#define HN_LOCK_DESTROY(sc)		sx_destroy(&(sc)->hn_lock)
+#define HN_LOCK_ASSERT(sc)		sx_assert(&(sc)->hn_lock, SA_XLOCKED)
+#define HN_LOCK(sc)			sx_xlock(&(sc)->hn_lock)
+#define HN_UNLOCK(sc)			sx_xunlock(&(sc)->hn_lock)
+
+#define HN_CSUM_IP_MASK			(CSUM_IP | CSUM_IP_TCP | CSUM_IP_UDP)
+#define HN_CSUM_IP6_MASK		(CSUM_IP6_TCP | CSUM_IP6_UDP)
+#define HN_CSUM_IP_HWASSIST(sc)		\
+	((sc)->hn_tx_ring[0].hn_csum_assist & HN_CSUM_IP_MASK)
+#define HN_CSUM_IP6_HWASSIST(sc)	\
+	((sc)->hn_tx_ring[0].hn_csum_assist & HN_CSUM_IP6_MASK)
 
 struct hn_txdesc {
 #ifndef HN_USE_TXDESC_BUFRING
@@ -200,10 +200,6 @@ struct hn_txdesc {
 #define HN_TXD_FLAG_ONLIST	0x1
 #define HN_TXD_FLAG_DMAMAP	0x2
 
-#define HN_NDIS_VLAN_INFO_INVALID	0xffffffff
-#define HN_NDIS_RXCSUM_INFO_INVALID	0
-#define HN_NDIS_HASH_INFO_INVALID	0
-
 struct hn_rxinfo {
 	uint32_t			vlan_info;
 	uint32_t			csum_info;
@@ -211,30 +207,19 @@ struct hn_rxinfo {
 	uint32_t			hash_value;
 };
 
-#define HN_LRO_LENLIM_MULTIRX_DEF	(12 * ETHERMTU)
-#define HN_LRO_LENLIM_DEF		(25 * ETHERMTU)
-/* YYY 2*MTU is a bit rough, but should be good enough. */
-#define HN_LRO_LENLIM_MIN(ifp)		(2 * (ifp)->if_mtu)
+#define HN_RXINFO_VLAN			0x0001
+#define HN_RXINFO_CSUM			0x0002
+#define HN_RXINFO_HASHINF		0x0004
+#define HN_RXINFO_HASHVAL		0x0008
+#define HN_RXINFO_ALL			\
+	(HN_RXINFO_VLAN |		\
+	 HN_RXINFO_CSUM |		\
+	 HN_RXINFO_HASHINF |		\
+	 HN_RXINFO_HASHVAL)
 
-#define HN_LRO_ACKCNT_DEF		1
-
-#define HN_LOCK_INIT(sc)		\
-	sx_init(&(sc)->hn_lock, device_get_nameunit((sc)->hn_dev))
-#define HN_LOCK_ASSERT(sc)		sx_assert(&(sc)->hn_lock, SA_XLOCKED)
-#define HN_LOCK_DESTROY(sc)		sx_destroy(&(sc)->hn_lock)
-#define HN_LOCK(sc)			sx_xlock(&(sc)->hn_lock)
-#define HN_UNLOCK(sc)			sx_xunlock(&(sc)->hn_lock)
-
-#define HN_CSUM_IP_MASK			(CSUM_IP | CSUM_IP_TCP | CSUM_IP_UDP)
-#define HN_CSUM_IP6_MASK		(CSUM_IP6_TCP | CSUM_IP6_UDP)
-#define HN_CSUM_IP_HWASSIST(sc)		\
-	((sc)->hn_tx_ring[0].hn_csum_assist & HN_CSUM_IP_MASK)
-#define HN_CSUM_IP6_HWASSIST(sc)	\
-	((sc)->hn_tx_ring[0].hn_csum_assist & HN_CSUM_IP6_MASK)
-
-/*
- * Globals
- */
+#define HN_NDIS_VLAN_INFO_INVALID	0xffffffff
+#define HN_NDIS_RXCSUM_INFO_INVALID	0
+#define HN_NDIS_HASH_INFO_INVALID	0
 
 SYSCTL_NODE(_hw, OID_AUTO, hn, CTLFLAG_RD | CTLFLAG_MPSAFE, NULL,
     "Hyper-V network interface");
@@ -287,8 +272,6 @@ static int hn_share_tx_taskq = 0;
 SYSCTL_INT(_hw_hn, OID_AUTO, share_tx_taskq, CTLFLAG_RDTUN,
     &hn_share_tx_taskq, 0, "Enable shared TX taskqueue");
 
-static struct taskqueue	*hn_tx_taskq;
-
 #ifndef HN_USE_TXDESC_BUFRING
 static int hn_use_txdesc_bufring = 0;
 #else
@@ -325,6 +308,7 @@ SYSCTL_UINT(_hw_hn, OID_AUTO, lro_mbufq_depth, CTLFLAG_RDTUN,
 #endif
 
 static u_int hn_cpu_index;
+static struct taskqueue	*hn_tx_taskq;
 
 /*
  * Forward declarations
@@ -4673,7 +4657,7 @@ static device_method_t netvsc_methods[] = {
 };
 
 static driver_t netvsc_driver = {
-        NETVSC_DEVNAME,
+        "hn",
         netvsc_methods,
         sizeof(struct hn_softc)
 };
