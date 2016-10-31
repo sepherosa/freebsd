@@ -255,6 +255,8 @@ static int			hn_rxfilter_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_rss_key_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_rss_ind_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_rss_hash_sysctl(SYSCTL_HANDLER_ARGS);
+static int			hn_rxpkt(struct hn_rx_ring *, const void *,
+				    int, const struct hn_rxinfo *);
 
 static void			hn_stop(struct hn_softc *);
 static void			hn_init_locked(struct hn_softc *);
@@ -269,6 +271,8 @@ static void			hn_chan_rollup(struct hn_rx_ring *,
 static void			hn_set_ring_inuse(struct hn_softc *, int);
 static int			hn_synth_attach(struct hn_softc *, int);
 static void			hn_synth_detach(struct hn_softc *);
+static int			hn_synth_alloc_subchans(struct hn_softc *,
+				    int *);
 static void			hn_suspend(struct hn_softc *);
 static void			hn_suspend_data(struct hn_softc *);
 static void			hn_suspend_mgmt(struct hn_softc *);
@@ -289,19 +293,28 @@ static void			hn_destroy_rx_data(struct hn_softc *);
 static void			hn_rx_drain(struct vmbus_channel *);
 static int			hn_check_iplen(const struct mbuf *, int);
 static int			hn_set_rxfilter(struct hn_softc *);
+static int			hn_rss_reconfig(struct hn_softc *);
+static void			hn_rss_ind_fixup(struct hn_softc *, int);
 
 static int			hn_create_tx_ring(struct hn_softc *, int);
 static void			hn_destroy_tx_ring(struct hn_tx_ring *);
 static int			hn_create_tx_data(struct hn_softc *, int);
 static void			hn_fixup_tx_data(struct hn_softc *);
 static void			hn_destroy_tx_data(struct hn_softc *);
+static void			hn_txdesc_dmamap_destroy(struct hn_txdesc *);
 static int			hn_encap(struct hn_tx_ring *,
 				    struct hn_txdesc *, struct mbuf **);
+static int			hn_send_pkt(struct ifnet *,
+				    struct hn_tx_ring *, struct hn_txdesc *);
 static void			hn_set_chim_size(struct hn_softc *, int);
 static void			hn_set_tso_maxsize(struct hn_softc *, int, int);
 static bool			hn_tx_ring_pending(struct hn_tx_ring *);
 static void			hn_tx_resume(struct hn_softc *, int);
 static void			hn_tx_ring_qflush(struct hn_tx_ring *);
+static int			hn_get_txswq_depth(const struct hn_tx_ring *);
+static void			hn_tx_done(struct hn_nvs_sendctx *,
+				    struct hn_softc *, struct vmbus_channel *,
+				    const void *, int);
 static int			hn_sendpkt_rndis_sglist(struct hn_tx_ring *,
 				    struct hn_txdesc *);
 static int			hn_sendpkt_rndis_chim(struct hn_tx_ring *,
@@ -2113,9 +2126,6 @@ hn_stop(struct hn_softc *sc)
 		sc->hn_tx_ring[i].hn_oactive = 0;
 }
 
-/*
- * FreeBSD transmit entry point
- */
 static void
 hn_start(struct ifnet *ifp)
 {
@@ -2209,20 +2219,6 @@ hn_init(void *xsc)
 	hn_init_locked(sc);
 	HN_UNLOCK(sc);
 }
-
-#ifdef LATER
-/*
- *
- */
-static void
-hn_watchdog(struct ifnet *ifp)
-{
-
-	if_printf(ifp, "watchdog timeout -- resetting\n");
-	hn_init(ifp->if_softc);    /* XXX */
-	if_inc_counter(ifp, IFCOUNTER_OERRORS, 1);
-}
-#endif
 
 #if __FreeBSD_version >= 1100099
 
