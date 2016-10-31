@@ -59,62 +59,41 @@ __FBSDID("$FreeBSD$");
 #include "opt_inet.h"
 
 #include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/sockio.h>
-#include <sys/limits.h>
-#include <sys/mbuf.h>
-#include <sys/malloc.h>
-#include <sys/module.h>
+#include <sys/bus.h>
 #include <sys/kernel.h>
-#include <sys/socket.h>
+#include <sys/limits.h>
+#include <sys/malloc.h>
+#include <sys/mbuf.h>
+#include <sys/module.h>
 #include <sys/queue.h>
 #include <sys/lock.h>
-#include <sys/sx.h>
 #include <sys/smp.h>
+#include <sys/socket.h>
+#include <sys/sockio.h>
+#include <sys/sx.h>
 #include <sys/sysctl.h>
-#include <sys/buf_ring.h>
+#include <sys/systm.h>
 #include <sys/taskqueue.h>
+#include <sys/buf_ring.h>
 
-#include <net/if.h>
-#include <net/if_arp.h>
-#include <net/ethernet.h>
-#include <net/if_dl.h>
-#include <net/if_media.h>
-#include <net/rndis.h>
+#include <machine/atomic.h>
+#include <machine/in_cksum.h>
+
 #include <net/bpf.h>
-
-#include <net/if_var.h>
+#include <net/ethernet.h>
+#include <net/if.h>
+#include <net/if_media.h>
 #include <net/if_types.h>
-#include <net/if_vlan_var.h>
+#include <net/if_var.h>
+#include <net/rndis.h>
 
 #include <netinet/in_systm.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
-#include <netinet/if_ether.h>
+#include <netinet/ip6.h>
 #include <netinet/tcp.h>
 #include <netinet/tcp_lro.h>
 #include <netinet/udp.h>
-#include <netinet/ip6.h>
-
-#include <vm/vm.h>
-#include <vm/vm_param.h>
-#include <vm/vm_kern.h>
-#include <vm/pmap.h>
-
-#include <machine/bus.h>
-#include <machine/resource.h>
-#include <machine/frame.h>
-
-#include <sys/bus.h>
-#include <sys/rman.h>
-#include <sys/mutex.h>
-#include <sys/errno.h>
-#include <sys/types.h>
-#include <machine/atomic.h>
-
-#include <machine/intr_machdep.h>
-
-#include <machine/in_cksum.h>
 
 #include <dev/hyperv/include/hyperv.h>
 #include <dev/hyperv/include/hyperv_busdma.h>
