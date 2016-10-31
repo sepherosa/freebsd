@@ -221,6 +221,11 @@ struct hn_rxinfo {
 #define HN_NDIS_RXCSUM_INFO_INVALID	0
 #define HN_NDIS_HASH_INFO_INVALID	0
 
+static int			hn_probe(device_t);
+static int			hn_attach(device_t);
+static int			hn_detach(device_t);
+static int			hn_shutdown(device_t);
+
 SYSCTL_NODE(_hw, OID_AUTO, hn, CTLFLAG_RD | CTLFLAG_MPSAFE, NULL,
     "Hyper-V network interface");
 
@@ -310,9 +315,6 @@ SYSCTL_UINT(_hw_hn, OID_AUTO, lro_mbufq_depth, CTLFLAG_RDTUN,
 static u_int hn_cpu_index;
 static struct taskqueue	*hn_tx_taskq;
 
-/*
- * Forward declarations
- */
 static void hn_stop(struct hn_softc *sc);
 static void hn_init_locked(struct hn_softc *sc);
 static void hn_init(void *xsc);
@@ -379,7 +381,6 @@ static void hn_resume_mgmt(struct hn_softc *);
 static void hn_rx_drain(struct vmbus_channel *);
 static void hn_tx_resume(struct hn_softc *, int);
 static void hn_tx_ring_qflush(struct hn_tx_ring *);
-static int netvsc_detach(device_t dev);
 static void hn_link_status(struct hn_softc *);
 static int hn_sendpkt_rndis_sglist(struct hn_tx_ring *, struct hn_txdesc *);
 static int hn_sendpkt_rndis_chim(struct hn_tx_ring *, struct hn_txdesc *);
@@ -415,6 +416,27 @@ static const uint8_t	hn_rss_key_default[NDIS_HASH_KEYSIZE_TOEPLITZ] = {
 	0x77, 0xcb, 0x2d, 0xa3, 0x80, 0x30, 0xf2, 0x0c,
 	0x6a, 0x42, 0xb7, 0x3b, 0xbe, 0xac, 0x01, 0xfa
 };
+
+static device_method_t hn_methods[] = {
+	/* Device interface */
+	DEVMETHOD(device_probe,		hn_probe),
+	DEVMETHOD(device_attach,	hn_attach),
+	DEVMETHOD(device_detach,	hn_detach),
+	DEVMETHOD(device_shutdown,	hn_shutdown),
+	DEVMETHOD_END
+};
+
+static driver_t hn_driver = {
+	"hn",
+	hn_methods,
+	sizeof(struct hn_softc)
+};
+
+static devclass_t hn_devclass;
+
+DRIVER_MODULE(hn, vmbus, hn_driver, hn_devclass, 0, 0);
+MODULE_VERSION(hn, 1);
+MODULE_DEPEND(hn, vmbus, 1, 1, 1);
 
 #if __FreeBSD_version >= 1100099
 static void
@@ -637,13 +659,10 @@ static const struct hyperv_guid g_net_vsc_device_type = {
 		0x91, 0x3F, 0xF2, 0xD2, 0xF9, 0x65, 0xED, 0x0E}
 };
 
-/*
- * Standard probe entry point.
- *
- */
 static int
-netvsc_probe(device_t dev)
+hn_probe(device_t dev)
 {
+
 	if (VMBUS_PROBE_GUID(device_get_parent(dev), dev,
 	    &g_net_vsc_device_type) == 0) {
 		device_set_desc(dev, "Hyper-V Network Interface");
@@ -652,14 +671,8 @@ netvsc_probe(device_t dev)
 	return ENXIO;
 }
 
-/*
- * Standard attach entry point.
- *
- * Called when the driver is loaded.  It allocates needed resources,
- * and initializes the "hardware" and software.
- */
 static int
-netvsc_attach(device_t dev)
+hn_attach(device_t dev)
 {
 	struct hn_softc *sc = device_get_softc(dev);
 	struct sysctl_oid_list *child;
@@ -907,12 +920,12 @@ netvsc_attach(device_t dev)
 failed:
 	if (sc->hn_flags & HN_FLAG_SYNTH_ATTACHED)
 		hn_synth_detach(sc);
-	netvsc_detach(dev);
+	hn_detach(dev);
 	return (error);
 }
 
 static int
-netvsc_detach(device_t dev)
+hn_detach(device_t dev)
 {
 	struct hn_softc *sc = device_get_softc(dev);
 	struct ifnet *ifp = sc->hn_ifp;
@@ -951,12 +964,10 @@ netvsc_detach(device_t dev)
 	return (0);
 }
 
-/*
- * Standard shutdown entry point
- */
 static int
-netvsc_shutdown(device_t dev)
+hn_shutdown(device_t dev)
 {
+
 	return (0);
 }
 
@@ -4645,25 +4656,3 @@ hn_tx_taskq_destroy(void *arg __unused)
 }
 SYSUNINIT(hn_txtq_destroy, SI_SUB_DRIVERS, SI_ORDER_SECOND,
     hn_tx_taskq_destroy, NULL);
-
-static device_method_t netvsc_methods[] = {
-        /* Device interface */
-        DEVMETHOD(device_probe,         netvsc_probe),
-        DEVMETHOD(device_attach,        netvsc_attach),
-        DEVMETHOD(device_detach,        netvsc_detach),
-        DEVMETHOD(device_shutdown,      netvsc_shutdown),
-
-        { 0, 0 }
-};
-
-static driver_t netvsc_driver = {
-        "hn",
-        netvsc_methods,
-        sizeof(struct hn_softc)
-};
-
-static devclass_t netvsc_devclass;
-
-DRIVER_MODULE(hn, vmbus, netvsc_driver, netvsc_devclass, 0, 0);
-MODULE_VERSION(hn, 1);
-MODULE_DEPEND(hn, vmbus, 1, 1, 1);
