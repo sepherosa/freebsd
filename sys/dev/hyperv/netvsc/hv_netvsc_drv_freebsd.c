@@ -296,28 +296,28 @@ static void			hn_rss_ind_fixup(struct hn_softc *, int);
 static int			hn_rxpkt(struct hn_rx_ring *, const void *,
 				    int, const struct hn_rxinfo *);
 
-static int			hn_create_tx_ring(struct hn_softc *, int);
-static void			hn_destroy_tx_ring(struct hn_tx_ring *);
+static int			hn_tx_ring_create(struct hn_softc *, int);
+static void			hn_tx_ring_destroy(struct hn_tx_ring *);
 static int			hn_create_tx_data(struct hn_softc *, int);
 static void			hn_fixup_tx_data(struct hn_softc *);
 static void			hn_destroy_tx_data(struct hn_softc *);
 static void			hn_txdesc_dmamap_destroy(struct hn_txdesc *);
 static int			hn_encap(struct hn_tx_ring *,
 				    struct hn_txdesc *, struct mbuf **);
-static int			hn_send_pkt(struct ifnet *,
-				    struct hn_tx_ring *, struct hn_txdesc *);
+static int			hn_txpkt(struct ifnet *, struct hn_tx_ring *,
+				    struct hn_txdesc *);
 static void			hn_set_chim_size(struct hn_softc *, int);
 static void			hn_set_tso_maxsize(struct hn_softc *, int, int);
 static bool			hn_tx_ring_pending(struct hn_tx_ring *);
-static void			hn_tx_resume(struct hn_softc *, int);
 static void			hn_tx_ring_qflush(struct hn_tx_ring *);
+static void			hn_resume_tx(struct hn_softc *, int);
 static int			hn_get_txswq_depth(const struct hn_tx_ring *);
-static void			hn_tx_done(struct hn_nvs_sendctx *,
+static void			hn_txpkt_done(struct hn_nvs_sendctx *,
 				    struct hn_softc *, struct vmbus_channel *,
 				    const void *, int);
-static int			hn_sendpkt_rndis_sglist(struct hn_tx_ring *,
+static int			hn_txpkt_sglist(struct hn_tx_ring *,
 				    struct hn_txdesc *);
-static int			hn_sendpkt_rndis_chim(struct hn_tx_ring *,
+static int			hn_txpkt_chim(struct hn_tx_ring *,
 				    struct hn_txdesc *);
 static int			hn_xmit(struct hn_tx_ring *, int);
 static void			hn_xmit_taskfunc(void *, int);
@@ -467,7 +467,7 @@ hn_set_lro_lenlim(struct hn_softc *sc, int lenlim)
 #endif
 
 static int
-hn_sendpkt_rndis_sglist(struct hn_tx_ring *txr, struct hn_txdesc *txd)
+hn_txpkt_sglist(struct hn_tx_ring *txr, struct hn_txdesc *txd)
 {
 
 	KASSERT(txd->chim_index == HN_NVS_CHIM_IDX_INVALID &&
@@ -477,7 +477,7 @@ hn_sendpkt_rndis_sglist(struct hn_tx_ring *txr, struct hn_txdesc *txd)
 }
 
 static int
-hn_sendpkt_rndis_chim(struct hn_tx_ring *txr, struct hn_txdesc *txd)
+hn_txpkt_chim(struct hn_tx_ring *txr, struct hn_txdesc *txd)
 {
 	struct hn_nvs_rndis rndis;
 
@@ -1209,7 +1209,7 @@ hn_txeof(struct hn_tx_ring *txr)
 }
 
 static void
-hn_tx_done(struct hn_nvs_sendctx *sndc, struct hn_softc *sc,
+hn_txpkt_done(struct hn_nvs_sendctx *sndc, struct hn_softc *sc,
     struct vmbus_channel *chan, const void *data __unused, int dlen __unused)
 {
 	struct hn_txdesc *txd = sndc->hn_cbarg;
@@ -1432,7 +1432,7 @@ hn_encap(struct hn_tx_ring *txr, struct hn_txdesc *txd, struct mbuf **m_head0)
 			txd->chim_size = pkt->rm_len;
 			txr->hn_gpa_cnt = 0;
 			txr->hn_tx_chimney++;
-			txr->hn_sendpkt = hn_sendpkt_rndis_chim;
+			txr->hn_sendpkt = hn_txpkt_chim;
 			goto done;
 		}
 	}
@@ -1479,12 +1479,12 @@ hn_encap(struct hn_tx_ring *txr, struct hn_txdesc *txd, struct mbuf **m_head0)
 
 	txd->chim_index = HN_NVS_CHIM_IDX_INVALID;
 	txd->chim_size = 0;
-	txr->hn_sendpkt = hn_sendpkt_rndis_sglist;
+	txr->hn_sendpkt = hn_txpkt_sglist;
 done:
 	txd->m = m_head;
 
 	/* Set the completion routine */
-	hn_nvs_sendctx_init(&txd->send_ctx, hn_tx_done, txd);
+	hn_nvs_sendctx_init(&txd->send_ctx, hn_txpkt_done, txd);
 
 	return 0;
 }
@@ -1495,7 +1495,7 @@ done:
  * associated w/ the txd will _not_ be freed.
  */
 static int
-hn_send_pkt(struct ifnet *ifp, struct hn_tx_ring *txr, struct hn_txdesc *txd)
+hn_txpkt(struct ifnet *ifp, struct hn_tx_ring *txr, struct hn_txdesc *txd)
 {
 	int error, send_failed = 0;
 
@@ -1611,7 +1611,7 @@ hn_start_locked(struct hn_tx_ring *txr, int len)
 			continue;
 		}
 
-		error = hn_send_pkt(ifp, txr, txd);
+		error = hn_txpkt(ifp, txr, txd);
 		if (__predict_false(error)) {
 			/* txd is freed, but m_head is not */
 			IFQ_DRV_PREPEND(&ifp->if_snd, m_head);
@@ -2204,7 +2204,7 @@ hn_init_locked(struct hn_softc *sc)
 		sc->hn_tx_ring[i].hn_oactive = 0;
 
 	/* Clear TX 'suspended' bit. */
-	hn_tx_resume(sc, sc->hn_tx_ring_inuse);
+	hn_resume_tx(sc, sc->hn_tx_ring_inuse);
 
 	/* Everything is ready; unleash! */
 	atomic_set_int(&ifp->if_drv_flags, IFF_DRV_RUNNING);
@@ -2901,7 +2901,7 @@ hn_destroy_rx_data(struct hn_softc *sc)
 }
 
 static int
-hn_create_tx_ring(struct hn_softc *sc, int id)
+hn_tx_ring_create(struct hn_softc *sc, int id)
 {
 	struct hn_tx_ring *txr = &sc->hn_tx_ring[id];
 	device_t dev = sc->hn_dev;
@@ -3098,7 +3098,7 @@ hn_txdesc_dmamap_destroy(struct hn_txdesc *txd)
 }
 
 static void
-hn_destroy_tx_ring(struct hn_tx_ring *txr)
+hn_tx_ring_destroy(struct hn_tx_ring *txr)
 {
 	struct hn_txdesc *txd;
 
@@ -3174,7 +3174,7 @@ hn_create_tx_data(struct hn_softc *sc, int ring_cnt)
 	for (i = 0; i < sc->hn_tx_ring_cnt; ++i) {
 		int error;
 
-		error = hn_create_tx_ring(sc, i);
+		error = hn_tx_ring_create(sc, i);
 		if (error)
 			return error;
 	}
@@ -3320,7 +3320,7 @@ hn_destroy_tx_data(struct hn_softc *sc)
 		return;
 
 	for (i = 0; i < sc->hn_tx_ring_cnt; ++i)
-		hn_destroy_tx_ring(&sc->hn_tx_ring[i]);
+		hn_tx_ring_destroy(&sc->hn_tx_ring[i]);
 
 	free(sc->hn_tx_ring, M_DEVBUF);
 	sc->hn_tx_ring = NULL;
@@ -3396,7 +3396,7 @@ hn_xmit(struct hn_tx_ring *txr, int len)
 			continue;
 		}
 
-		error = hn_send_pkt(ifp, txr, txd);
+		error = hn_txpkt(ifp, txr, txd);
 		if (__predict_false(error)) {
 			/* txd is freed, but m_head is not */
 			drbr_putback(ifp, txr->hn_mbuf_br, m_head);
@@ -4021,7 +4021,7 @@ hn_suspend(struct hn_softc *sc)
 }
 
 static void
-hn_tx_resume(struct hn_softc *sc, int tx_ring_cnt)
+hn_resume_tx(struct hn_softc *sc, int tx_ring_cnt)
 {
 	int i;
 
@@ -4054,7 +4054,7 @@ hn_resume_data(struct hn_softc *sc)
 	 * since hn_tx_ring_inuse can be changed after
 	 * hn_suspend_data().
 	 */
-	hn_tx_resume(sc, sc->hn_tx_ring_cnt);
+	hn_resume_tx(sc, sc->hn_tx_ring_cnt);
 
 	if (!hn_use_if_start) {
 		/*
