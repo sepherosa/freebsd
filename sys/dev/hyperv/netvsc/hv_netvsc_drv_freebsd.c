@@ -255,8 +255,6 @@ static int			hn_rxfilter_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_rss_key_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_rss_ind_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_rss_hash_sysctl(SYSCTL_HANDLER_ARGS);
-static int			hn_rxpkt(struct hn_rx_ring *, const void *,
-				    int, const struct hn_rxinfo *);
 
 static void			hn_stop(struct hn_softc *);
 static void			hn_init_locked(struct hn_softc *);
@@ -280,9 +278,10 @@ static void			hn_resume(struct hn_softc *);
 static void			hn_resume_data(struct hn_softc *);
 static void			hn_resume_mgmt(struct hn_softc *);
 static void			hn_suspend_mgmt_taskfunc(void *, int);
+static void			hn_chan_drain(struct vmbus_channel *);
 
-static void			hn_link_status_update(struct hn_softc *);
-static void			hn_network_change(struct hn_softc *);
+static void			hn_update_link_status(struct hn_softc *);
+static void			hn_change_network(struct hn_softc *);
 static void			hn_link_taskfunc(void *, int);
 static void			hn_netchg_init_taskfunc(void *, int);
 static void			hn_netchg_status_taskfunc(void *, int);
@@ -290,11 +289,12 @@ static void			hn_link_status(struct hn_softc *);
 
 static int			hn_create_rx_data(struct hn_softc *, int);
 static void			hn_destroy_rx_data(struct hn_softc *);
-static void			hn_rx_drain(struct vmbus_channel *);
 static int			hn_check_iplen(const struct mbuf *, int);
 static int			hn_set_rxfilter(struct hn_softc *);
 static int			hn_rss_reconfig(struct hn_softc *);
 static void			hn_rss_ind_fixup(struct hn_softc *, int);
+static int			hn_rxpkt(struct hn_rx_ring *, const void *,
+				    int, const struct hn_rxinfo *);
 
 static int			hn_create_tx_ring(struct hn_softc *, int);
 static void			hn_destroy_tx_ring(struct hn_tx_ring *);
@@ -931,7 +931,7 @@ hn_attach(device_t dev)
 	 * Kick off link status check.
 	 */
 	sc->hn_mgmt_taskq = sc->hn_mgmt_taskq0;
-	hn_link_status_update(sc);
+	hn_update_link_status(sc);
 
 	return (0);
 failed:
@@ -1049,7 +1049,7 @@ hn_netchg_status_taskfunc(void *xsc, int pending __unused)
 }
 
 static void
-hn_link_status_update(struct hn_softc *sc)
+hn_update_link_status(struct hn_softc *sc)
 {
 
 	if (sc->hn_mgmt_taskq != NULL)
@@ -1057,7 +1057,7 @@ hn_link_status_update(struct hn_softc *sc)
 }
 
 static void
-hn_network_change(struct hn_softc *sc)
+hn_change_network(struct hn_softc *sc)
 {
 
 	if (sc->hn_mgmt_taskq != NULL)
@@ -3919,7 +3919,7 @@ hn_set_ring_inuse(struct hn_softc *sc, int ring_cnt)
 }
 
 static void
-hn_rx_drain(struct vmbus_channel *chan)
+hn_chan_drain(struct vmbus_channel *chan)
 {
 
 	while (!vmbus_chan_rx_empty(chan) || !vmbus_chan_tx_empty(chan))
@@ -3974,9 +3974,9 @@ hn_suspend_data(struct hn_softc *sc)
 
 	if (subch != NULL) {
 		for (i = 0; i < nsubch; ++i)
-			hn_rx_drain(subch[i]);
+			hn_chan_drain(subch[i]);
 	}
-	hn_rx_drain(sc->hn_prichan);
+	hn_chan_drain(sc->hn_prichan);
 
 	if (subch != NULL)
 		vmbus_subchan_rel(subch, nsubch);
@@ -4092,9 +4092,9 @@ hn_resume_mgmt(struct hn_softc *sc)
 	 * detection.
 	 */
 	if (sc->hn_link_flags & HN_LINK_FLAG_NETCHG)
-		hn_network_change(sc);
+		hn_change_network(sc);
 	else
-		hn_link_status_update(sc);
+		hn_update_link_status(sc);
 }
 
 static void
@@ -4121,7 +4121,7 @@ hn_rndis_rx_status(struct hn_softc *sc, const void *data, int dlen)
 	switch (msg->rm_status) {
 	case RNDIS_STATUS_MEDIA_CONNECT:
 	case RNDIS_STATUS_MEDIA_DISCONNECT:
-		hn_link_status_update(sc);
+		hn_update_link_status(sc);
 		break;
 
 	case RNDIS_STATUS_TASK_OFFLOAD_CURRENT_CONFIG:
@@ -4141,7 +4141,7 @@ hn_rndis_rx_status(struct hn_softc *sc, const void *data, int dlen)
 			if_printf(sc->hn_ifp, "network changed, change %u\n",
 			    change);
 		}
-		hn_network_change(sc);
+		hn_change_network(sc);
 		break;
 
 	default:
