@@ -225,6 +225,8 @@ static int			hn_probe(device_t);
 static int			hn_attach(device_t);
 static int			hn_detach(device_t);
 static int			hn_shutdown(device_t);
+static void			hn_chan_callback(struct vmbus_channel *,
+				    void *);
 
 static void			hn_init(void *);
 static int			hn_ioctl(struct ifnet *, u_long, caddr_t);
@@ -234,6 +236,105 @@ static void			hn_xmit_qflush(struct ifnet *);
 static int			hn_ifmedia_upd(struct ifnet *);
 static void			hn_ifmedia_sts(struct ifnet *,
 				    struct ifmediareq *);
+
+static int			hn_rndis_rxinfo(const void *, int,
+				    struct hn_rxinfo *);
+static void			hn_rndis_rx_data(struct hn_rx_ring *,
+				    const void *, int);
+static void			hn_rndis_rx_status(struct hn_softc *,
+				    const void *, int);
+
+static void			hn_nvs_handle_notify(struct hn_softc *,
+				    const struct vmbus_chanpkt_hdr *);
+static void			hn_nvs_handle_comp(struct hn_softc *,
+				    struct vmbus_channel *,
+				    const struct vmbus_chanpkt_hdr *);
+static void			hn_nvs_handle_rxbuf(struct hn_rx_ring *,
+				    struct vmbus_channel *,
+				    const struct vmbus_chanpkt_hdr *);
+static void			hn_nvs_ack_rxbuf(struct hn_rx_ring *,
+				    struct vmbus_channel *, uint64_t);
+
+#if __FreeBSD_version >= 1100099
+static int			hn_lro_lenlim_sysctl(SYSCTL_HANDLER_ARGS);
+static int			hn_lro_ackcnt_sysctl(SYSCTL_HANDLER_ARGS);
+#endif
+static int			hn_trust_hcsum_sysctl(SYSCTL_HANDLER_ARGS);
+static int			hn_chim_size_sysctl(SYSCTL_HANDLER_ARGS);
+#if __FreeBSD_version < 1100095
+static int			hn_rx_stat_int_sysctl(SYSCTL_HANDLER_ARGS);
+#else
+static int			hn_rx_stat_u64_sysctl(SYSCTL_HANDLER_ARGS);
+#endif
+static int			hn_rx_stat_ulong_sysctl(SYSCTL_HANDLER_ARGS);
+static int			hn_tx_stat_ulong_sysctl(SYSCTL_HANDLER_ARGS);
+static int			hn_tx_conf_int_sysctl(SYSCTL_HANDLER_ARGS);
+static int			hn_ndis_version_sysctl(SYSCTL_HANDLER_ARGS);
+static int			hn_caps_sysctl(SYSCTL_HANDLER_ARGS);
+static int			hn_hwassist_sysctl(SYSCTL_HANDLER_ARGS);
+static int			hn_rxfilter_sysctl(SYSCTL_HANDLER_ARGS);
+static int			hn_rss_key_sysctl(SYSCTL_HANDLER_ARGS);
+static int			hn_rss_ind_sysctl(SYSCTL_HANDLER_ARGS);
+static int			hn_rss_hash_sysctl(SYSCTL_HANDLER_ARGS);
+
+static void			hn_stop(struct hn_softc *);
+static void			hn_init_locked(struct hn_softc *);
+static int			hn_chan_attach(struct hn_softc *,
+				    struct vmbus_channel *);
+static void			hn_chan_detach(struct hn_softc *,
+				    struct vmbus_channel *);
+static int			hn_attach_subchans(struct hn_softc *);
+static void			hn_detach_allchans(struct hn_softc *);
+static void			hn_chan_rollup(struct hn_rx_ring *,
+				    struct hn_tx_ring *);
+static void			hn_set_ring_inuse(struct hn_softc *, int);
+static int			hn_synth_attach(struct hn_softc *, int);
+static void			hn_synth_detach(struct hn_softc *);
+static void			hn_suspend(struct hn_softc *);
+static void			hn_suspend_data(struct hn_softc *);
+static void			hn_suspend_mgmt(struct hn_softc *);
+static void			hn_resume(struct hn_softc *);
+static void			hn_resume_data(struct hn_softc *);
+static void			hn_resume_mgmt(struct hn_softc *);
+static void			hn_suspend_mgmt_taskfunc(void *, int);
+
+static void			hn_link_status_update(struct hn_softc *);
+static void			hn_network_change(struct hn_softc *);
+static void			hn_link_taskfunc(void *, int);
+static void			hn_netchg_init_taskfunc(void *, int);
+static void			hn_netchg_status_taskfunc(void *, int);
+static void			hn_link_status(struct hn_softc *);
+
+static int			hn_create_rx_data(struct hn_softc *, int);
+static void			hn_destroy_rx_data(struct hn_softc *);
+static void			hn_rx_drain(struct vmbus_channel *);
+static int			hn_check_iplen(const struct mbuf *, int);
+static int			hn_set_rxfilter(struct hn_softc *);
+
+static int			hn_create_tx_ring(struct hn_softc *, int);
+static void			hn_destroy_tx_ring(struct hn_tx_ring *);
+static int			hn_create_tx_data(struct hn_softc *, int);
+static void			hn_fixup_tx_data(struct hn_softc *);
+static void			hn_destroy_tx_data(struct hn_softc *);
+static int			hn_encap(struct hn_tx_ring *,
+				    struct hn_txdesc *, struct mbuf **);
+static void			hn_set_chim_size(struct hn_softc *, int);
+static void			hn_set_tso_maxsize(struct hn_softc *, int, int);
+static bool			hn_tx_ring_pending(struct hn_tx_ring *);
+static void			hn_tx_resume(struct hn_softc *, int);
+static void			hn_tx_ring_qflush(struct hn_tx_ring *);
+static int			hn_sendpkt_rndis_sglist(struct hn_tx_ring *,
+				    struct hn_txdesc *);
+static int			hn_sendpkt_rndis_chim(struct hn_tx_ring *,
+				    struct hn_txdesc *);
+static int			hn_xmit(struct hn_tx_ring *, int);
+static void			hn_xmit_taskfunc(void *, int);
+static void			hn_xmit_txeof(struct hn_tx_ring *);
+static void			hn_xmit_txeof_taskfunc(void *, int);
+static int			hn_start_locked(struct hn_tx_ring *, int);
+static void			hn_start_taskfunc(void *, int);
+static void			hn_start_txeof(struct hn_tx_ring *);
+static void			hn_start_txeof_taskfunc(void *, int);
 
 SYSCTL_NODE(_hw, OID_AUTO, hn, CTLFLAG_RD | CTLFLAG_MPSAFE, NULL,
     "Hyper-V network interface");
@@ -323,99 +424,6 @@ SYSCTL_UINT(_hw_hn, OID_AUTO, lro_mbufq_depth, CTLFLAG_RDTUN,
 
 static u_int hn_cpu_index;
 static struct taskqueue	*hn_tx_taskq;
-
-static void hn_stop(struct hn_softc *sc);
-static void hn_init_locked(struct hn_softc *sc);
-
-static int hn_start_locked(struct hn_tx_ring *txr, int len);
-static void hn_start_txeof(struct hn_tx_ring *);
-
-#if __FreeBSD_version >= 1100099
-static int hn_lro_lenlim_sysctl(SYSCTL_HANDLER_ARGS);
-static int hn_lro_ackcnt_sysctl(SYSCTL_HANDLER_ARGS);
-#endif
-static int hn_trust_hcsum_sysctl(SYSCTL_HANDLER_ARGS);
-static int hn_chim_size_sysctl(SYSCTL_HANDLER_ARGS);
-#if __FreeBSD_version < 1100095
-static int hn_rx_stat_int_sysctl(SYSCTL_HANDLER_ARGS);
-#else
-static int hn_rx_stat_u64_sysctl(SYSCTL_HANDLER_ARGS);
-#endif
-static int hn_rx_stat_ulong_sysctl(SYSCTL_HANDLER_ARGS);
-static int hn_tx_stat_ulong_sysctl(SYSCTL_HANDLER_ARGS);
-static int hn_tx_conf_int_sysctl(SYSCTL_HANDLER_ARGS);
-static int hn_ndis_version_sysctl(SYSCTL_HANDLER_ARGS);
-static int hn_caps_sysctl(SYSCTL_HANDLER_ARGS);
-static int hn_hwassist_sysctl(SYSCTL_HANDLER_ARGS);
-static int hn_rxfilter_sysctl(SYSCTL_HANDLER_ARGS);
-static int hn_rss_key_sysctl(SYSCTL_HANDLER_ARGS);
-static int hn_rss_ind_sysctl(SYSCTL_HANDLER_ARGS);
-static int hn_rss_hash_sysctl(SYSCTL_HANDLER_ARGS);
-
-static int hn_check_iplen(const struct mbuf *, int);
-static int hn_create_tx_ring(struct hn_softc *, int);
-static void hn_destroy_tx_ring(struct hn_tx_ring *);
-static int hn_create_tx_data(struct hn_softc *, int);
-static void hn_fixup_tx_data(struct hn_softc *);
-static void hn_destroy_tx_data(struct hn_softc *);
-
-static void hn_start_taskfunc(void *, int);
-static void hn_start_txeof_taskfunc(void *, int);
-
-static void hn_link_taskfunc(void *, int);
-static void hn_netchg_init_taskfunc(void *, int);
-static void hn_netchg_status_taskfunc(void *, int);
-static void hn_suspend_mgmt_taskfunc(void *, int);
-static int hn_encap(struct hn_tx_ring *, struct hn_txdesc *, struct mbuf **);
-static int hn_create_rx_data(struct hn_softc *sc, int);
-static void hn_destroy_rx_data(struct hn_softc *sc);
-static void hn_set_chim_size(struct hn_softc *, int);
-static void hn_set_tso_maxsize(struct hn_softc *, int, int);
-static int hn_chan_attach(struct hn_softc *, struct vmbus_channel *);
-static void hn_chan_detach(struct hn_softc *, struct vmbus_channel *);
-static int hn_attach_subchans(struct hn_softc *);
-static void hn_detach_allchans(struct hn_softc *);
-static void hn_chan_callback(struct vmbus_channel *chan, void *xrxr);
-static void hn_chan_rollup(struct hn_rx_ring *, struct hn_tx_ring *);
-static void hn_set_ring_inuse(struct hn_softc *, int);
-static int hn_synth_attach(struct hn_softc *, int);
-static void hn_synth_detach(struct hn_softc *);
-static bool hn_tx_ring_pending(struct hn_tx_ring *);
-static void hn_suspend(struct hn_softc *);
-static void hn_suspend_data(struct hn_softc *);
-static void hn_suspend_mgmt(struct hn_softc *);
-static void hn_resume(struct hn_softc *);
-static void hn_resume_data(struct hn_softc *);
-static void hn_resume_mgmt(struct hn_softc *);
-static void hn_rx_drain(struct vmbus_channel *);
-static void hn_tx_resume(struct hn_softc *, int);
-static void hn_tx_ring_qflush(struct hn_tx_ring *);
-static void hn_link_status(struct hn_softc *);
-static int hn_sendpkt_rndis_sglist(struct hn_tx_ring *, struct hn_txdesc *);
-static int hn_sendpkt_rndis_chim(struct hn_tx_ring *, struct hn_txdesc *);
-static int hn_set_rxfilter(struct hn_softc *);
-static void hn_link_status_update(struct hn_softc *);
-static void hn_network_change(struct hn_softc *);
-
-static int hn_rndis_rxinfo(const void *, int, struct hn_rxinfo *);
-static void hn_rndis_rx_data(struct hn_rx_ring *, const void *, int);
-static void hn_rndis_rx_status(struct hn_softc *, const void *, int);
-
-static void hn_nvs_handle_notify(struct hn_softc *sc,
-		const struct vmbus_chanpkt_hdr *pkt);
-static void hn_nvs_handle_comp(struct hn_softc *sc, struct vmbus_channel *chan,
-		const struct vmbus_chanpkt_hdr *pkt);
-static void hn_nvs_handle_rxbuf(struct hn_rx_ring *rxr,
-		struct vmbus_channel *chan,
-		const struct vmbus_chanpkt_hdr *pkthdr);
-static void hn_nvs_ack_rxbuf(struct hn_rx_ring *, struct vmbus_channel *,
-		uint64_t);
-
-
-static int hn_xmit(struct hn_tx_ring *, int);
-static void hn_xmit_txeof(struct hn_tx_ring *);
-static void hn_xmit_taskfunc(void *, int);
-static void hn_xmit_txeof_taskfunc(void *, int);
 
 static const uint8_t	hn_rss_key_default[NDIS_HASH_KEYSIZE_TOEPLITZ] = {
 	0x6d, 0x5a, 0x56, 0xda, 0x25, 0x5b, 0x0e, 0xc2,
