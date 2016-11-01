@@ -3637,13 +3637,30 @@ hn_start_locked(struct hn_tx_ring *txr, int len)
 			continue;
 		}
 
-		error = hn_txpkt(ifp, txr, txd);
-		if (__predict_false(error)) {
-			/* txd is freed, but m_head is not */
-			IFQ_DRV_PREPEND(&ifp->if_snd, m_head);
-			atomic_set_int(&ifp->if_drv_flags, IFF_DRV_OACTIVE);
-			break;
+		if (txr->hn_agg_pktleft == 0) {
+			if (txr->hn_agg_txd != NULL) {
+				KASSERT(m_head == NULL,
+				    ("pending mbuf for aggregated txdesc"));
+				hn_flush_txagg(ifp, txr);
+				/* XXX check error */
+			} else {
+				KASSERT(m_head != NULL, ("mbuf was freed"));
+				error = hn_txpkt(ifp, txr, txd);
+				if (__predict_false(error)) {
+					/* txd is freed, but m_head is not */
+					IFQ_DRV_PREPEND(&ifp->if_snd, m_head);
+					atomic_set_int(&ifp->if_drv_flags,
+					    IFF_DRV_OACTIVE);
+					break;
+				}
+			}
 		}
+#ifdef INVARIANTS
+		else {
+			KASSERT(m_head == NULL,
+			    ("pending mbuf for aggregation"));
+		}
+#endif
 	}
 
 	/* Flush pending aggerated transmission. */
@@ -3771,13 +3788,30 @@ hn_xmit(struct hn_tx_ring *txr, int len)
 			continue;
 		}
 
-		error = hn_txpkt(ifp, txr, txd);
-		if (__predict_false(error)) {
-			/* txd is freed, but m_head is not */
-			drbr_putback(ifp, txr->hn_mbuf_br, m_head);
-			txr->hn_oactive = 1;
-			break;
+		if (txr->hn_agg_pktleft == 0) {
+			if (txr->hn_agg_txd != NULL) {
+				KASSERT(m_head == NULL,
+				    ("pending mbuf for aggregated txdesc"));
+				hn_flush_txagg(ifp, txr);
+				/* XXX check error */
+			} else {
+				KASSERT(m_head != NULL, ("mbuf was freed"));
+				error = hn_txpkt(ifp, txr, txd);
+				if (__predict_false(error)) {
+					/* txd is freed, but m_head is not */
+					drbr_putback(ifp, txr->hn_mbuf_br,
+					    m_head);
+					txr->hn_oactive = 1;
+					break;
+				}
+			}
 		}
+#ifdef INVARIANTS
+		else {
+			KASSERT(m_head == NULL,
+			    ("pending mbuf for aggregation"));
+		}
+#endif
 
 		/* Sent */
 		drbr_advance(ifp, txr->hn_mbuf_br);
