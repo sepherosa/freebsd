@@ -128,6 +128,7 @@ struct hn_tx_ring {
 	int		hn_agg_szmax;
 	short		hn_agg_pktmax;
 	short		hn_agg_align;
+	struct hn_txdesc *hn_agg_txd;
 
 	int		(*hn_sendpkt)(struct hn_tx_ring *, struct hn_txdesc *);
 	int		hn_suspended;

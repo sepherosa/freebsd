@@ -310,7 +310,7 @@ static int			hn_create_tx_data(struct hn_softc *, int);
 static void			hn_fixup_tx_data(struct hn_softc *);
 static void			hn_destroy_tx_data(struct hn_softc *);
 static void			hn_txdesc_dmamap_destroy(struct hn_txdesc *);
-static int			hn_encap(struct hn_tx_ring *,
+static int			hn_encap(struct ifnet *, struct hn_tx_ring *,
 				    struct hn_txdesc *, struct mbuf **);
 static int			hn_txpkt(struct ifnet *, struct hn_tx_ring *,
 				    struct hn_txdesc *);
@@ -1498,12 +1498,34 @@ hn_rndis_pktinfo_append(struct rndis_packet_msg *pkt, size_t pktsize,
 	return (pi->rm_data);
 }
 
+static __inline void
+hn_flush_txagg(struct ifnet *ifp, struct hn_tx_ring *txr)
+{
+	struct hn_txdesc *txd;
+	struct mbuf *m;
+	int error;
+
+	txd = txr->hn_agg_txd;
+	KASSERT(txd != NULL, ("no aggregate txdesc"));
+
+	/*
+	 * Since txd's mbuf will not be freed upon error,
+	 * save it for later free if error ever happens.
+	 */
+	m = txd->m;
+	error = hn_txpkt(ifp, txr, txd);
+	if (error)
+		m_freem(m);
+	txr->hn_agg_txd = NULL;
+}
+
 /*
  * NOTE:
  * If this function fails, then both txd and m_head0 will be freed.
  */
 static int
-hn_encap(struct hn_tx_ring *txr, struct hn_txdesc *txd, struct mbuf **m_head0)
+hn_encap(struct ifnet *ifp, struct hn_tx_ring *txr, struct hn_txdesc *txd,
+    struct mbuf **m_head0)
 {
 	bus_dma_segment_t segs[HN_TX_DATA_SEGCNT_MAX];
 	int error, nsegs, i;
@@ -1530,6 +1552,9 @@ hn_encap(struct hn_tx_ring *txr, struct hn_txdesc *txd, struct mbuf **m_head0)
 			 */
 			pkt = chim;
 		}
+	} else {
+		if (txr->hn_agg_txd != NULL)
+			hn_flush_txagg(ifp, txr);
 	}
 
 	pkt->rm_type = REMOTE_NDIS_PACKET_MSG;
@@ -3491,18 +3516,20 @@ hn_start_locked(struct hn_tx_ring *txr, int len)
 {
 	struct hn_softc *sc = txr->hn_sc;
 	struct ifnet *ifp = sc->hn_ifp;
+	int sched = 0;
 
 	KASSERT(hn_use_if_start,
 	    ("hn_start_locked is called, when if_start is disabled"));
 	KASSERT(txr == &sc->hn_tx_ring[0], ("not the first TX ring"));
 	mtx_assert(&txr->hn_tx_lock, MA_OWNED);
+	KASSERT(txr->hn_agg_txd == NULL, ("lingering aggregate txdesc"));
 
 	if (__predict_false(txr->hn_suspended))
-		return 0;
+		return (0);
 
 	if ((ifp->if_drv_flags & (IFF_DRV_RUNNING | IFF_DRV_OACTIVE)) !=
 	    IFF_DRV_RUNNING)
-		return 0;
+		return (0);
 
 	while (!IFQ_DRV_IS_EMPTY(&ifp->if_snd)) {
 		struct hn_txdesc *txd;
@@ -3520,7 +3547,8 @@ hn_start_locked(struct hn_tx_ring *txr, int len)
 			 * following up packets) to tx taskqueue.
 			 */
 			IFQ_DRV_PREPEND(&ifp->if_snd, m_head);
-			return 1;
+			sched = 1;
+			break;
 		}
 
 #if defined(INET6) || defined(INET)
@@ -3541,7 +3569,7 @@ hn_start_locked(struct hn_tx_ring *txr, int len)
 			break;
 		}
 
-		error = hn_encap(txr, txd, &m_head);
+		error = hn_encap(ifp, txr, txd, &m_head);
 		if (error) {
 			/* Both txd and m_head are freed */
 			continue;
@@ -3555,7 +3583,11 @@ hn_start_locked(struct hn_tx_ring *txr, int len)
 			break;
 		}
 	}
-	return 0;
+
+	/* Flush pending aggerated transmission. */
+	if (txr->hn_agg_txd != NULL)
+		hn_flush_txagg(ifp, txr);
+	return (sched);
 }
 
 static void
@@ -3632,18 +3664,20 @@ hn_xmit(struct hn_tx_ring *txr, int len)
 	struct hn_softc *sc = txr->hn_sc;
 	struct ifnet *ifp = sc->hn_ifp;
 	struct mbuf *m_head;
+	int sched = 0;
 
 	mtx_assert(&txr->hn_tx_lock, MA_OWNED);
 #ifdef HN_IFSTART_SUPPORT
 	KASSERT(hn_use_if_start == 0,
 	    ("hn_xmit is called, when if_start is enabled"));
 #endif
+	KASSERT(txr->hn_agg_txd == NULL, ("lingering aggregate txdesc"));
 
 	if (__predict_false(txr->hn_suspended))
-		return 0;
+		return (0);
 
 	if ((ifp->if_drv_flags & IFF_DRV_RUNNING) == 0 || txr->hn_oactive)
-		return 0;
+		return (0);
 
 	while ((m_head = drbr_peek(ifp, txr->hn_mbuf_br)) != NULL) {
 		struct hn_txdesc *txd;
@@ -3656,7 +3690,8 @@ hn_xmit(struct hn_tx_ring *txr, int len)
 			 * following up packets) to tx taskqueue.
 			 */
 			drbr_putback(ifp, txr->hn_mbuf_br, m_head);
-			return 1;
+			sched = 1;
+			break;
 		}
 
 		txd = hn_txdesc_get(txr);
@@ -3667,7 +3702,7 @@ hn_xmit(struct hn_tx_ring *txr, int len)
 			break;
 		}
 
-		error = hn_encap(txr, txd, &m_head);
+		error = hn_encap(ifp, txr, txd, &m_head);
 		if (error) {
 			/* Both txd and m_head are freed; discard */
 			drbr_advance(ifp, txr->hn_mbuf_br);
@@ -3685,7 +3720,11 @@ hn_xmit(struct hn_tx_ring *txr, int len)
 		/* Sent */
 		drbr_advance(ifp, txr->hn_mbuf_br);
 	}
-	return 0;
+
+	/* Flush pending aggerated transmission. */
+	if (txr->hn_agg_txd != NULL)
+		hn_flush_txagg(ifp, txr);
+	return (sched);
 }
 
 static int
