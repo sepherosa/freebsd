@@ -315,6 +315,7 @@ static void			hn_set_tso_maxsize(struct hn_softc *, int, int);
 static bool			hn_tx_ring_pending(struct hn_tx_ring *);
 static void			hn_tx_ring_qflush(struct hn_tx_ring *);
 static void			hn_resume_tx(struct hn_softc *, int);
+static void			hn_set_txagg(struct hn_softc *);
 static int			hn_get_txswq_depth(const struct hn_tx_ring *);
 static void			hn_txpkt_done(struct hn_nvs_sendctx *,
 				    struct hn_softc *, struct vmbus_channel *,
@@ -429,6 +430,16 @@ static u_int			hn_lro_mbufq_depth = 0;
 SYSCTL_UINT(_hw_hn, OID_AUTO, lro_mbufq_depth, CTLFLAG_RDTUN,
     &hn_lro_mbufq_depth, 0, "Depth of LRO mbuf queue");
 #endif
+
+/* Packet transmit aggregation size limit */
+static int			hn_tx_agg_size = -1;
+SYSCTL_UINT(_hw_hn, OID_AUTO, tx_agg_size, CTLFLAG_RDTUN,
+    &hn_tx_agg_size, 0, "Packet transmission aggregation size limit");
+
+/* Packet transmit aggregation count limit */
+static int			hn_tx_agg_pkts = -1;
+SYSCTL_UINT(_hw_hn, OID_AUTO, tx_agg_pkts, CTLFLAG_RDTUN,
+    &hn_tx_agg_pkts, 0, "Packet transmission aggregation packet limit");
 
 static u_int			hn_cpu_index;	/* next CPU for channel */
 static struct taskqueue		*hn_tx_taskq;	/* shared TX taskqueue */
@@ -658,6 +669,94 @@ hn_set_rxfilter(struct hn_softc *sc)
 	return (error);
 }
 
+static void
+hn_set_txagg(struct hn_softc *sc)
+{
+	uint32_t size, pkts;
+	int i;
+
+	/*
+	 * Setup aggregation size.
+	 */
+	if (sc->hn_agg_size < 0) {
+		size = UINT32_MAX;
+	} else if (sc->hn_agg_size <=
+	    (ETHER_MIN_LEN + ETHER_VLAN_ENCAP_LEN - ETHER_CRC_LEN) +
+	    HN_RNDIS_PKT_LEN) {
+		/* Disable */
+		size = 0;
+		pkts = 0;
+		goto done;
+	} else {
+		size = sc->hn_agg_size;
+	}
+
+	if (sc->hn_rndis_agg_size == 0) {
+		/* Disable */
+		size = 0;
+		pkts = 0;
+		goto done;
+	} else if (sc->hn_rndis_agg_size < size) {
+		size = sc->hn_rndis_agg_size;
+	}
+
+	/* NOTE: Type of the per TX ring setting is 'int'. */
+	if (size > INT_MAX)
+		size = INT_MAX;
+
+	/* NOTE: We only aggregate packets using chimney send buffers. */
+	if (size > (uint32_t)sc->hn_chim_szmax)
+		size = sc->hn_chim_szmax;
+
+	/*
+	 * Setup aggregation packet count.
+	 */
+	if (sc->hn_agg_pkts < 0) {
+		pkts = UINT32_MAX;
+	} else if (sc->hn_agg_pkts <= 1) {
+		/* Disable */
+		size = 0;
+		pkts = 0;
+		goto done;
+	} else {
+		pkts = sc->hn_agg_pkts;
+	}
+
+	if (sc->hn_rndis_agg_pkts == 0) {
+		/* Disable */
+		size = 0;
+		pkts = 0;
+		goto done;
+	} else if (sc->hn_rndis_agg_pkts < pkts) {
+		pkts = sc->hn_rndis_agg_pkts;
+	}
+
+	/* NOTE: Type of the per TX ring setting is 'short'. */
+	if (pkts > SHRT_MAX)
+		pkts = SHRT_MAX;
+
+done:
+	/* NOTE: Type of the per TX ring setting is 'short'. */
+	if (sc->hn_rndis_agg_align > SHRT_MAX) {
+		/* Disable */
+		size = 0;
+		pkts = 0;
+	}
+
+	if (bootverbose) {
+		if_printf(sc->hn_ifp, "TX agg size %u, pkts %u, align %u\n",
+		    size, pkts, sc->hn_rndis_agg_align);
+	}
+
+	for (i = 0; i < sc->hn_tx_ring_cnt; ++i) {
+		struct hn_tx_ring *txr = &sc->hn_tx_ring[i];
+
+		txr->hn_agg_szmax = size;
+		txr->hn_agg_pktmax = pkts;
+		txr->hn_agg_align = sc->hn_rndis_agg_align;
+	}
+}
+
 static int
 hn_get_txswq_depth(const struct hn_tx_ring *txr)
 {
@@ -783,6 +882,12 @@ hn_attach(device_t dev)
 	sc->hn_dev = dev;
 	sc->hn_prichan = vmbus_get_channel(dev);
 	HN_LOCK_INIT(sc);
+
+	/*
+	 * Initialize these tunables once.
+	 */
+	sc->hn_agg_size = hn_tx_agg_size;
+	sc->hn_agg_pkts = hn_tx_agg_pkts;
 
 	/*
 	 * Setup taskqueue for transmission.
@@ -3986,6 +4091,11 @@ back:
 	error = hn_attach_subchans(sc);
 	if (error)
 		return (error);
+
+	/*
+	 * Fixup transmission aggregation setup.
+	 */
+	hn_set_txagg(sc);
 
 	sc->hn_flags |= HN_FLAG_SYNTH_ATTACHED;
 	return (0);
