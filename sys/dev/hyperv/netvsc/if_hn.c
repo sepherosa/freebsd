@@ -682,26 +682,20 @@ hn_set_txagg(struct hn_softc *sc)
 	/*
 	 * Setup aggregation size.
 	 */
-	if (sc->hn_agg_size < 0) {
+	if (sc->hn_agg_size < 0)
 		size = UINT32_MAX;
-	} else if (sc->hn_agg_size <=
-	    (ETHER_MIN_LEN + ETHER_VLAN_ENCAP_LEN - ETHER_CRC_LEN) +
+	else
+		size = sc->hn_agg_size;
+
+	if (sc->hn_rndis_agg_size < size)
+		size = sc->hn_rndis_agg_size;
+
+	if (size <= (ETHER_MIN_LEN + ETHER_VLAN_ENCAP_LEN - ETHER_CRC_LEN) +
 	    HN_RNDIS_PKT_LEN) {
 		/* Disable */
 		size = 0;
 		pkts = 0;
 		goto done;
-	} else {
-		size = sc->hn_agg_size;
-	}
-
-	if (sc->hn_rndis_agg_size == 0) {
-		/* Disable */
-		size = 0;
-		pkts = 0;
-		goto done;
-	} else if (sc->hn_rndis_agg_size < size) {
-		size = sc->hn_rndis_agg_size;
 	}
 
 	/* NOTE: Type of the per TX ring setting is 'int'. */
@@ -715,24 +709,19 @@ hn_set_txagg(struct hn_softc *sc)
 	/*
 	 * Setup aggregation packet count.
 	 */
-	if (sc->hn_agg_pkts < 0) {
+	if (sc->hn_agg_pkts < 0)
 		pkts = UINT32_MAX;
-	} else if (sc->hn_agg_pkts <= 1) {
-		/* Disable */
-		size = 0;
-		pkts = 0;
-		goto done;
-	} else {
+	else
 		pkts = sc->hn_agg_pkts;
-	}
 
-	if (sc->hn_rndis_agg_pkts == 0) {
+	if (sc->hn_rndis_agg_pkts < pkts)
+		pkts = sc->hn_rndis_agg_pkts;
+
+	if (pkts <= 1) {
 		/* Disable */
 		size = 0;
 		pkts = 0;
 		goto done;
-	} else if (sc->hn_rndis_agg_pkts < pkts) {
-		pkts = sc->hn_rndis_agg_pkts;
 	}
 
 	/* NOTE: Type of the per TX ring setting is 'short'. */
