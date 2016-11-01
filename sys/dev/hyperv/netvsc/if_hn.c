@@ -261,6 +261,8 @@ static int			hn_rss_ind_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_rss_hash_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_txagg_size_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_txagg_pkts_sysctl(SYSCTL_HANDLER_ARGS);
+static int			hn_txagg_pktmax_sysctl(SYSCTL_HANDLER_ARGS);
+static int			hn_txagg_align_sysctl(SYSCTL_HANDLER_ARGS);
 
 static void			hn_stop(struct hn_softc *);
 static void			hn_init_locked(struct hn_softc *);
@@ -2575,6 +2577,26 @@ hn_txagg_pkts_sysctl(SYSCTL_HANDLER_ARGS)
 }
 
 static int
+hn_txagg_pktmax_sysctl(SYSCTL_HANDLER_ARGS)
+{
+	struct hn_softc *sc = arg1;
+	int pkts;
+
+	pkts = sc->hn_tx_ring[0].hn_agg_pktmax;
+	return (sysctl_handle_int(oidp, &pkts, 0, req));
+}
+
+static int
+hn_txagg_align_sysctl(SYSCTL_HANDLER_ARGS)
+{
+	struct hn_softc *sc = arg1;
+	int align;
+
+	align = sc->hn_tx_ring[0].hn_agg_align;
+	return (sysctl_handle_int(oidp, &align, 0, req));
+}
+
+static int
 hn_ndis_version_sysctl(SYSCTL_HANDLER_ARGS)
 {
 	struct hn_softc *sc = arg1;
@@ -3350,6 +3372,17 @@ hn_create_tx_data(struct hn_softc *sc, int ring_cnt)
 	    CTLFLAG_RD, &sc->hn_tx_ring_cnt, 0, "# created TX rings");
 	SYSCTL_ADD_INT(ctx, child, OID_AUTO, "tx_ring_inuse",
 	    CTLFLAG_RD, &sc->hn_tx_ring_inuse, 0, "# used TX rings");
+	SYSCTL_ADD_INT(ctx, child, OID_AUTO, "agg_szmax",
+	    CTLFLAG_RD, &sc->hn_tx_ring[0].hn_agg_szmax, 0,
+	    "Applied packet transmission aggregation size");
+	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "agg_pktmax",
+	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MPSAFE, sc, 0,
+	    hn_txagg_pktmax_sysctl, "I",
+	    "Applied packet transmission aggregation packets");
+	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "agg_align",
+	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MPSAFE, sc, 0,
+	    hn_txagg_align_sysctl, "I",
+	    "Applied packet transmission aggregation alignment");
 
 	return 0;
 }
