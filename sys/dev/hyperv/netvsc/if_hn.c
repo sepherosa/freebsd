@@ -3634,6 +3634,8 @@ hn_start_locked(struct hn_tx_ring *txr, int len)
 		error = hn_encap(ifp, txr, txd, &m_head);
 		if (error) {
 			/* Both txd and m_head are freed */
+			KASSERT(txr->hn_agg_txd == NULL,
+			    ("encap failed w/ pending aggregated txdesc"));
 			continue;
 		}
 
@@ -3784,6 +3786,8 @@ hn_xmit(struct hn_tx_ring *txr, int len)
 		error = hn_encap(ifp, txr, txd, &m_head);
 		if (error) {
 			/* Both txd and m_head are freed; discard */
+			KASSERT(txr->hn_agg_txd == NULL,
+			    ("encap failed w/ pending aggregated txdesc"));
 			drbr_advance(ifp, txr->hn_mbuf_br);
 			continue;
 		}
