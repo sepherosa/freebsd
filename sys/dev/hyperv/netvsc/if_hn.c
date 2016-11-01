@@ -259,6 +259,8 @@ static int			hn_rxfilter_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_rss_key_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_rss_ind_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_rss_hash_sysctl(SYSCTL_HANDLER_ARGS);
+static int			hn_txagg_size_sysctl(SYSCTL_HANDLER_ARGS);
+static int			hn_txagg_pkts_sysctl(SYSCTL_HANDLER_ARGS);
 
 static void			hn_stop(struct hn_softc *);
 static void			hn_init_locked(struct hn_softc *);
@@ -1053,6 +1055,15 @@ hn_attach(device_t dev)
 	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "rndis_agg_align",
 	    CTLFLAG_RD, &sc->hn_rndis_agg_align, 0,
 	    "RNDIS packet aggregation alignment");
+	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "agg_size",
+	    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_MPSAFE, sc, 0,
+	    hn_txagg_size_sysctl, "I",
+	    "Packet transmission aggregation size, 0 -- disable, -1 -- auto");
+	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "agg_pkts",
+	    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_MPSAFE, sc, 0,
+	    hn_txagg_pkts_sysctl, "I",
+	    "Packet transmission aggregation packets, "
+	    "0 -- disable, -1 -- auto");
 
 	/*
 	 * Setup the ifmedia, which has been initialized earlier.
@@ -2523,6 +2534,44 @@ hn_tx_conf_int_sysctl(SYSCTL_HANDLER_ARGS)
 	HN_UNLOCK(sc);
 
 	return 0;
+}
+
+static int
+hn_txagg_size_sysctl(SYSCTL_HANDLER_ARGS)
+{
+	struct hn_softc *sc = arg1;
+	int error, size;
+
+	size = sc->hn_agg_size;
+	error = sysctl_handle_int(oidp, &size, 0, req);
+	if (error || req->newptr == NULL)
+		return (error);
+
+	HN_LOCK(sc);
+	sc->hn_agg_size = size;
+	hn_set_txagg(sc);
+	HN_UNLOCK(sc);
+
+	return (0);
+}
+
+static int
+hn_txagg_pkts_sysctl(SYSCTL_HANDLER_ARGS)
+{
+	struct hn_softc *sc = arg1;
+	int error, pkts;
+
+	pkts = sc->hn_agg_pkts;
+	error = sysctl_handle_int(oidp, &pkts, 0, req);
+	if (error || req->newptr == NULL)
+		return (error);
+
+	HN_LOCK(sc);
+	sc->hn_agg_pkts = pkts;
+	hn_set_txagg(sc);
+	HN_UNLOCK(sc);
+
+	return (0);
 }
 
 static int
