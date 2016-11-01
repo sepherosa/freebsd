@@ -159,6 +159,12 @@ __FBSDID("$FreeBSD$");
 #define HN_CSUM_IP6_HWASSIST(sc)	\
 	((sc)->hn_tx_ring[0].hn_csum_assist & HN_CSUM_IP6_MASK)
 
+#define HN_PKTSIZE_MIN(align)		\
+	roundup2(ETHER_MIN_LEN + ETHER_VLAN_ENCAP_LEN - ETHER_CRC_LEN + \
+	    HN_RNDIS_PKT_LEN, (align))
+#define HN_PKTSIZE(m, align)		\
+	roundup2((m)->m_pkthdr.len + HN_RNDIS_PKT_LEN, (align))
+
 struct hn_txdesc {
 #ifndef HN_USE_TXDESC_BUFRING
 	SLIST_ENTRY(hn_txdesc)		link;
@@ -441,7 +447,7 @@ SYSCTL_UINT(_hw_hn, OID_AUTO, tx_agg_size, CTLFLAG_RDTUN,
     &hn_tx_agg_size, 0, "Packet transmission aggregation size limit");
 
 /* Packet transmit aggregation count limit */
-static int			hn_tx_agg_pkts = -1;
+static int			hn_tx_agg_pkts = 0;
 SYSCTL_UINT(_hw_hn, OID_AUTO, tx_agg_pkts, CTLFLAG_RDTUN,
     &hn_tx_agg_pkts, 0, "Packet transmission aggregation packet limit");
 
@@ -690,8 +696,7 @@ hn_set_txagg(struct hn_softc *sc)
 	if (sc->hn_rndis_agg_size < size)
 		size = sc->hn_rndis_agg_size;
 
-	if (size <= (ETHER_MIN_LEN + ETHER_VLAN_ENCAP_LEN - ETHER_CRC_LEN) +
-	    HN_RNDIS_PKT_LEN) {
+	if (size <= HN_PKTSIZE_MIN(sc->hn_rndis_agg_align)) {
 		/* Disable */
 		size = 0;
 		pkts = 0;
@@ -1516,7 +1521,76 @@ hn_flush_txagg(struct ifnet *ifp, struct hn_tx_ring *txr)
 	error = hn_txpkt(ifp, txr, txd);
 	if (error)
 		m_freem(m);
+
 	txr->hn_agg_txd = NULL;
+	txr->hn_agg_szleft = 0;
+	txr->hn_agg_pktleft = 0;
+	txr->hn_agg_prevpkt = NULL;
+}
+
+static void *
+hn_try_txagg(struct ifnet *ifp, struct hn_tx_ring *txr, struct hn_txdesc *txd,
+    int pktsize)
+{
+	void *chim;
+
+	if (txr->hn_agg_txd != NULL) {
+		if (txr->hn_agg_pktleft >= 1 && txr->hn_agg_szleft > pktsize) {
+			struct hn_txdesc *agg_txd = txr->hn_agg_txd;
+			struct rndis_packet_msg *pkt = txr->hn_agg_prevpkt;
+			int olen;
+
+			/*
+			 * Update the previous RNDIS packet size, it can be
+			 * increased due to alignment padding for this RNDIS
+			 * packet.  And update the aggregated txdesc's chimney
+			 * sending buffer size accordingly.
+			 *
+			 * XXX zero-out the padding.
+			 */
+			olen = pkt->rm_len;
+			pkt->rm_len = roundup2(olen, txr->hn_agg_align);
+			agg_txd->chim_size += pkt->rm_len - olen;
+			/* TODO: Link this txd to agg_txd */
+
+			chim = (uint8_t *)pkt + pkt->rm_len;
+			/* Save the current packet for later fixup. */
+			txr->hn_agg_prevpkt = chim;
+
+			txr->hn_agg_pktleft--;
+			txr->hn_agg_szleft -= pktsize;
+			if (txr->hn_agg_szleft <=
+			    HN_PKTSIZE_MIN(txr->hn_agg_align)) {
+				/*
+				 * Probably can't aggregate more packets,
+				 * flush this aggregated packet proactively.
+				 */
+				txr->hn_agg_pktleft = 0;
+			}
+			/* Done! */
+			return (chim);
+		}
+		hn_flush_txagg(ifp, txr);
+	}
+	KASSERT(txr->hn_agg_txd == NULL, ("lingering aggregated txdesc"));
+
+	txr->hn_tx_chimney_tried++;
+	txd->chim_index = hn_chim_alloc(txr->hn_sc);
+	if (txd->chim_index == HN_NVS_CHIM_IDX_INVALID)
+		return (NULL);
+	txr->hn_tx_chimney++;
+
+	chim = txr->hn_sc->hn_chim +
+	    (txd->chim_index * txr->hn_sc->hn_chim_szmax);
+
+	if (txr->hn_agg_pktmax > 1 &&
+	    txr->hn_agg_szmax > pktsize + HN_PKTSIZE_MIN(txr->hn_agg_align)) {
+		txr->hn_agg_txd = txd;
+		txr->hn_agg_pktleft = txr->hn_agg_pktmax - 1;
+		txr->hn_agg_szleft = txr->hn_agg_szmax - pktsize;
+		txr->hn_agg_prevpkt = chim;
+	}
+	return (chim);
 }
 
 /*
@@ -1533,25 +1607,14 @@ hn_encap(struct ifnet *ifp, struct hn_tx_ring *txr, struct hn_txdesc *txd,
 	struct rndis_packet_msg *pkt;
 	uint32_t *pi_data;
 	void *chim = NULL;
-	int pktlen;
+	int pkt_hlen, pkt_size;
 
 	pkt = txd->rndis_pkt;
-	if (m_head->m_pkthdr.len + HN_RNDIS_PKT_LEN < txr->hn_chim_size) {
-		/*
-		 * This packet is small enough to fit into a chimney sending
-		 * buffer.  Try allocating one chimney sending buffer now.
-		 */
-		txr->hn_tx_chimney_tried++;
-		txd->chim_index = hn_chim_alloc(txr->hn_sc);
-		if (txd->chim_index != HN_NVS_CHIM_IDX_INVALID) {
-			chim = txr->hn_sc->hn_chim +
-			    (txd->chim_index * txr->hn_sc->hn_chim_szmax);
-			/*
-			 * Directly fill the chimney sending buffer w/ the
-			 * RNDIS packet message.
-			 */
+	pkt_size = HN_PKTSIZE(m_head, txr->hn_agg_align);
+	if (pkt_size < txr->hn_chim_size) {
+		chim = hn_try_txagg(ifp, txr, txd, pkt_size);
+		if (chim != NULL)
 			pkt = chim;
-		}
 	} else {
 		if (txr->hn_agg_txd != NULL)
 			hn_flush_txagg(ifp, txr);
@@ -1623,7 +1686,7 @@ hn_encap(struct ifnet *ifp, struct hn_tx_ring *txr, struct hn_txdesc *txd,
 			*pi_data |= NDIS_TXCSUM_INFO_UDPCS;
 	}
 
-	pktlen = pkt->rm_pktinfooffset + pkt->rm_pktinfolen;
+	pkt_hlen = pkt->rm_pktinfooffset + pkt->rm_pktinfolen;
 	/* Convert RNDIS packet message offsets */
 	pkt->rm_dataoffset = hn_rndis_pktmsg_offset(pkt->rm_dataoffset);
 	pkt->rm_pktinfooffset = hn_rndis_pktmsg_offset(pkt->rm_pktinfooffset);
@@ -1637,11 +1700,10 @@ hn_encap(struct ifnet *ifp, struct hn_tx_ring *txr, struct hn_txdesc *txd,
 		KASSERT(pkt == chim, ("RNDIS pkt not in chimney buffer"));
 
 		m_copydata(m_head, 0, m_head->m_pkthdr.len,
-		    ((uint8_t *)chim) + pktlen);
+		    ((uint8_t *)chim) + pkt_hlen);
 
 		txd->chim_size = pkt->rm_len;
 		txr->hn_gpa_cnt = 0;
-		txr->hn_tx_chimney++;
 		txr->hn_sendpkt = hn_txpkt_chim;
 		goto done;
 	}
@@ -1675,7 +1737,7 @@ hn_encap(struct ifnet *ifp, struct hn_tx_ring *txr, struct hn_txdesc *txd,
 	/* send packet with page buffer */
 	txr->hn_gpa[0].gpa_page = atop(txd->rndis_pkt_paddr);
 	txr->hn_gpa[0].gpa_ofs = txd->rndis_pkt_paddr & PAGE_MASK;
-	txr->hn_gpa[0].gpa_len = pktlen;
+	txr->hn_gpa[0].gpa_len = pkt_hlen;
 
 	/*
 	 * Fill the page buffers with mbuf info after the page
