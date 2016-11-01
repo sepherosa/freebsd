@@ -125,6 +125,10 @@ struct hn_tx_ring {
 	bus_dma_tag_t	hn_tx_data_dtag;
 	uint64_t	hn_csum_assist;
 
+	int		hn_agg_szmax;
+	short		hn_agg_pktmax;
+	short		hn_agg_align;
+
 	int		(*hn_sendpkt)(struct hn_tx_ring *, struct hn_txdesc *);
 	int		hn_suspended;
 	int		hn_gpa_cnt;
@@ -180,6 +184,9 @@ struct hn_softc {
 	uint32_t	hn_nvs_ver;
 	uint32_t	hn_rx_filter;
 
+	int			hn_agg_size;	/* user setting */
+	int			hn_agg_pkts;	/* user setting */
+
 	struct taskqueue	*hn_mgmt_taskq;
 	struct taskqueue	*hn_mgmt_taskq0;
 	struct task		hn_link_task;
@@ -200,6 +207,9 @@ struct hn_softc {
 	uint32_t		hn_ndis_ver;
 	int			hn_ndis_tso_szmax;
 	int			hn_ndis_tso_sgmin;
+	uint32_t		hn_rndis_agg_size;
+	uint32_t		hn_rndis_agg_pkts;
+	uint32_t		hn_rndis_agg_align;
 
 	int			hn_rss_ind_size;
 	uint32_t		hn_rss_hash;	/* NDIS_HASH_ */

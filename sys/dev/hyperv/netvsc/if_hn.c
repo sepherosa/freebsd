@@ -939,6 +939,15 @@ hn_attach(device_t dev)
 	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "rss_ind",
 	    CTLTYPE_OPAQUE | CTLFLAG_RW | CTLFLAG_MPSAFE, sc, 0,
 	    hn_rss_ind_sysctl, "IU", "RSS indirect table");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "rndis_agg_size",
+	    CTLFLAG_RD, &sc->hn_rndis_agg_size, 0,
+	    "RNDIS offered packet aggregation size limit");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "rndis_agg_pkts",
+	    CTLFLAG_RD, &sc->hn_rndis_agg_pkts, 0,
+	    "RNDIS offered packet aggregation count limit");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "rndis_agg_align",
+	    CTLFLAG_RD, &sc->hn_rndis_agg_align, 0,
+	    "RNDIS packet aggregation alignment");
 
 	/*
 	 * Setup the ifmedia, which has been initialized earlier.
