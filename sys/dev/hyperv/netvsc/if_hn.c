@@ -1872,6 +1872,7 @@ again:
 				if_inc_counter(ifp, IFCOUNTER_OMCASTS, 1);
 		}
 		txr->hn_pkts++;
+		txr->hn_sends++;
 	}
 	hn_txdesc_put(txr, txd);
 
@@ -3379,6 +3380,8 @@ hn_tx_ring_create(struct hn_softc *sc, int id)
 			SYSCTL_ADD_ULONG(ctx, child, OID_AUTO, "packets",
 			    CTLFLAG_RW, &txr->hn_pkts,
 			    "# of packets transmitted");
+			SYSCTL_ADD_ULONG(ctx, child, OID_AUTO, "sends",
+			    CTLFLAG_RW, &txr->hn_sends, "# of sends");
 		}
 	}
 
