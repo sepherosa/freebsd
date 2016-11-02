@@ -3686,7 +3686,7 @@ hn_start_locked(struct hn_tx_ring *txr, int len)
 	    ("hn_start_locked is called, when if_start is disabled"));
 	KASSERT(txr == &sc->hn_tx_ring[0], ("not the first TX ring"));
 	mtx_assert(&txr->hn_tx_lock, MA_OWNED);
-	KASSERT(txr->hn_agg_txd == NULL, ("lingering aggregate txdesc"));
+	KASSERT(txr->hn_agg_txd == NULL, ("lingering aggregating txdesc"));
 
 	if (__predict_false(txr->hn_suspended))
 		return (0);
@@ -3856,7 +3856,7 @@ hn_xmit(struct hn_tx_ring *txr, int len)
 	KASSERT(hn_use_if_start == 0,
 	    ("hn_xmit is called, when if_start is enabled"));
 #endif
-	KASSERT(txr->hn_agg_txd == NULL, ("lingering aggregate txdesc"));
+	KASSERT(txr->hn_agg_txd == NULL, ("lingering aggregating txdesc"));
 
 	if (__predict_false(txr->hn_suspended))
 		return (0);
