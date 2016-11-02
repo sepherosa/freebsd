@@ -3661,6 +3661,8 @@ hn_start_locked(struct hn_tx_ring *txr, int len)
 		else {
 			KASSERT(m_head == NULL,
 			    ("pending mbuf for aggregation"));
+			KASSERT(txr->hn_agg_txd != NULL,
+			    ("no aggregated txdesc"));
 		}
 #endif
 	}
@@ -3814,6 +3816,8 @@ hn_xmit(struct hn_tx_ring *txr, int len)
 		else {
 			KASSERT(m_head == NULL,
 			    ("pending mbuf for aggregation"));
+			KASSERT(txr->hn_agg_txd != NULL,
+			    ("no aggregated txdesc"));
 		}
 #endif
 
