@@ -1330,6 +1330,12 @@ hn_txdesc_put(struct hn_tx_ring *txr, struct hn_txdesc *txd)
 			    ("resursive aggregation"));
 			KASSERT((tmp_txd->flags & HN_TXD_FLAG_ONAGG),
 			    ("not aggregated txdesc"));
+			KASSERT((tmp_txd->flags & HN_TXD_FLAG_DMAMAP) == 0,
+			    ("aggregated txdesc uses dmamap"));
+			KASSERT(tmp_txd->chim_index == HN_NVS_CHIM_IDX_INVALID,
+			    ("aggregated txdesc consumes chimney buffer"));
+			KASSERT(tmp_txd->chim_size == 0,
+			    ("aggregated txdesc non-zero chimney buffer size"));
 
 			STAILQ_REMOVE_HEAD(&txd->agg_list, agg_link);
 			tmp_txd->flags &= ~HN_TXD_FLAG_ONAGG;
