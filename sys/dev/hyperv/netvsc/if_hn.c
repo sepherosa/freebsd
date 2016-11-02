@@ -1741,8 +1741,12 @@ hn_encap(struct ifnet *ifp, struct hn_tx_ring *txr, struct hn_txdesc *txd,
 	if (chim != NULL) {
 		struct hn_txdesc *tgt_txd = txd;
 
-		if (txr->hn_agg_txd != NULL)
+		if (txr->hn_agg_txd != NULL) {
 			tgt_txd = txr->hn_agg_txd;
+#ifdef INVARIANTS
+			*m_head0 = NULL;
+#endif
+		}
 
 		KASSERT(pkt == chim, ("RNDIS pkt not in chimney buffer"));
 		KASSERT(tgt_txd->chim_index != HN_NVS_CHIM_IDX_INVALID,
