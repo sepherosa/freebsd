@@ -1832,6 +1832,12 @@ done:
 	/* Set the completion routine */
 	hn_nvs_sendctx_init(&txd->send_ctx, hn_txpkt_done, txd);
 
+	/* Update temporary stats for later use. */
+	txr->hn_stat_pkts++;
+	txr->hn_stat_size += m_head->m_pkthdr.len;
+	if (m_head->m_flags & M_MCAST)
+		txr->hn_stat_mcasts++;
+
 	return 0;
 }
 
@@ -1861,17 +1867,19 @@ again:
 				ETHER_BPF_MTAP(ifp, tmp_txd->m);
 		}
 
-		if_inc_counter(ifp, IFCOUNTER_OPACKETS, 1);
+		if_inc_counter(ifp, IFCOUNTER_OPACKETS, txr->hn_stat_pkts);
 #ifdef HN_IFSTART_SUPPORT
 		if (!hn_use_if_start)
 #endif
 		{
 			if_inc_counter(ifp, IFCOUNTER_OBYTES,
-			    txd->m->m_pkthdr.len);
-			if (txd->m->m_flags & M_MCAST)
-				if_inc_counter(ifp, IFCOUNTER_OMCASTS, 1);
+			    txr->hn_stat_size);
+			if (txd->m->m_flags & M_MCAST) {
+				if_inc_counter(ifp, IFCOUNTER_OMCASTS,
+				    txr->hn_stat_mcasts);
+			}
 		}
-		txr->hn_pkts++;
+		txr->hn_pkts += txr->hn_stat_pkts;
 		txr->hn_sends++;
 	}
 	hn_txdesc_put(txr, txd);
@@ -1912,7 +1920,11 @@ again:
 
 		txr->hn_send_failed++;
 	}
-	return error;
+
+	txr->hn_stat_size = 0;
+	txr->hn_stat_pkts = 0;
+	txr->hn_stat_mcasts = 0;
+	return (error);
 }
 
 /*

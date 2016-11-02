@@ -133,6 +133,10 @@ struct hn_tx_ring {
 	int		hn_agg_szleft;
 	short		hn_agg_pktleft;
 	struct rndis_packet_msg *hn_agg_prevpkt;
+	/* Temporary stats for each sends. */
+	int		hn_stat_size;
+	short		hn_stat_pkts;
+	short		hn_stat_mcasts;
 
 	int		(*hn_sendpkt)(struct hn_tx_ring *, struct hn_txdesc *);
 	int		hn_suspended;
