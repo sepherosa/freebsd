@@ -169,6 +169,8 @@ struct hn_txdesc {
 #ifndef HN_USE_TXDESC_BUFRING
 	SLIST_ENTRY(hn_txdesc)		link;
 #endif
+	STAILQ_ENTRY(hn_txdesc)		agg_link;
+	STAILQ_HEAD(, hn_txdesc)	agg_list;
 	struct mbuf			*m;
 	struct hn_tx_ring		*txr;
 	int				refs;
@@ -186,6 +188,7 @@ struct hn_txdesc {
 
 #define HN_TXD_FLAG_ONLIST		0x0001
 #define HN_TXD_FLAG_DMAMAP		0x0002
+#define HN_TXD_FLAG_ONAGG		0x0004
 
 struct hn_rxinfo {
 	uint32_t			vlan_info;
@@ -1310,10 +1313,30 @@ hn_txdesc_put(struct hn_tx_ring *txr, struct hn_txdesc *txd)
 
 	KASSERT((txd->flags & HN_TXD_FLAG_ONLIST) == 0,
 	    ("put an onlist txd %#x", txd->flags));
+	KASSERT((txd->flags & HN_TXD_FLAG_ONAGG) == 0,
+	    ("put an onagg txd %#x", txd->flags));
 
 	KASSERT(txd->refs > 0, ("invalid txd refs %d", txd->refs));
 	if (atomic_fetchadd_int(&txd->refs, -1) != 1)
 		return 0;
+
+	if (!STAILQ_EMPTY(&txd->agg_list)) {
+		struct hn_txdesc *tmp_txd;
+
+		while ((tmp_txd = STAILQ_FIRST(&txd->agg_list)) != NULL) {
+			int freed;
+
+			KASSERT(STAILQ_EMPTY(&tmp_txd->agg_list),
+			    ("resursive aggregation"));
+			KASSERT((tmp_txd->flags & HN_TXD_FLAG_ONAGG),
+			    ("not aggregated txdesc"));
+
+			STAILQ_REMOVE_HEAD(&txd->agg_list, agg_link);
+			tmp_txd->flags &= ~HN_TXD_FLAG_ONAGG;
+			freed = hn_txdesc_put(txr, tmp_txd);
+			KASSERT(freed, ("failed to free aggregated txdesc"));
+		}
+	}
 
 	if (txd->chim_index != HN_NVS_CHIM_IDX_INVALID) {
 		KASSERT((txd->flags & HN_TXD_FLAG_DMAMAP) == 0,
@@ -1374,8 +1397,10 @@ hn_txdesc_get(struct hn_tx_ring *txr)
 		atomic_subtract_int(&txr->hn_txdesc_avail, 1);
 #endif
 		KASSERT(txd->m == NULL && txd->refs == 0 &&
+		    STAILQ_EMPTY(&txd->agg_list) &&
 		    txd->chim_index == HN_NVS_CHIM_IDX_INVALID &&
 		    (txd->flags & HN_TXD_FLAG_ONLIST) &&
+		    (txd->flags & HN_TXD_FLAG_ONAGG) == 0 &&
 		    (txd->flags & HN_TXD_FLAG_DMAMAP) == 0, ("invalid txd"));
 		txd->flags &= ~HN_TXD_FLAG_ONLIST;
 		txd->refs = 1;
@@ -1390,6 +1415,21 @@ hn_txdesc_hold(struct hn_txdesc *txd)
 	/* 0->1 transition will never work */
 	KASSERT(txd->refs > 0, ("invalid refs %d", txd->refs));
 	atomic_add_int(&txd->refs, 1);
+}
+
+static __inline void
+hn_txdesc_agg(struct hn_txdesc *agg_txd, struct hn_txdesc *txd)
+{
+
+	KASSERT((agg_txd->flags & HN_TXD_FLAG_ONAGG) == 0,
+	    ("recursive aggregation1"));
+
+	KASSERT((txd->flags & HN_TXD_FLAG_ONAGG) == 0,
+	    ("already aggregated"));
+	KASSERT(STAILQ_EMPTY(txd->agg_list), ("recursive aggregation2"));
+
+	txd->flags |= HN_TXD_FLAG_ONAGG;
+	STAILQ_INSERT_TAIL(&agg_txd->agg_list, txd, agg_link);
 }
 
 static bool
@@ -1551,7 +1591,9 @@ hn_try_txagg(struct ifnet *ifp, struct hn_tx_ring *txr, struct hn_txdesc *txd,
 			olen = pkt->rm_len;
 			pkt->rm_len = roundup2(olen, txr->hn_agg_align);
 			agg_txd->chim_size += pkt->rm_len - olen;
-			/* TODO: Link this txd to agg_txd */
+
+			/* Link this txdesc to the parent. */
+			hn_txdesc_agg(agg_txd, txd);
 
 			chim = (uint8_t *)pkt + pkt->rm_len;
 			/* Save the current packet for later fixup. */
@@ -3215,6 +3257,7 @@ hn_tx_ring_create(struct hn_softc *sc, int id)
 
 		txd->txr = txr;
 		txd->chim_index = HN_NVS_CHIM_IDX_INVALID;
+		STAILQ_INIT(&txd->agg_list);
 
 		/*
 		 * Allocate and load RNDIS packet message.
