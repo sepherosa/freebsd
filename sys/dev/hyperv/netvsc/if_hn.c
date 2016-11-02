@@ -170,7 +170,11 @@ struct hn_txdesc {
 	SLIST_ENTRY(hn_txdesc)		link;
 #endif
 	STAILQ_ENTRY(hn_txdesc)		agg_link;
+	/*
+	 * Aggregated txdescs, in sending order.
+	 */
 	STAILQ_HEAD(, hn_txdesc)	agg_list;
+
 	struct mbuf			*m;
 	struct hn_tx_ring		*txr;
 	int				refs;
@@ -1843,12 +1847,20 @@ hn_txpkt(struct ifnet *ifp, struct hn_tx_ring *txr, struct hn_txdesc *txd)
 
 again:
 	/*
-	 * Make sure that txd is not freed before ETHER_BPF_MTAP.
+	 * Make sure that txd and any aggregated txds are not freed before
+	 * ETHER_BPF_MTAP.
 	 */
 	hn_txdesc_hold(txd);
 	error = txr->hn_sendpkt(txr, txd);
 	if (!error) {
-		ETHER_BPF_MTAP(ifp, txd->m);
+		if (bpf_peers_present(ifp->if_bpf)) {
+			const struct hn_txdesc *tmp_txd;
+
+			ETHER_BPF_MTAP(ifp, txd->m);
+			STAILQ_FOREACH(tmp_txd, &txd->agg_list, agg_link)
+				ETHER_BPF_MTAP(ifp, tmp_txd->m);
+		}
+
 		if_inc_counter(ifp, IFCOUNTER_OPACKETS, 1);
 #ifdef HN_IFSTART_SUPPORT
 		if (!hn_use_if_start)
