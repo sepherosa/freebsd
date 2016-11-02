@@ -1674,8 +1674,13 @@ hn_encap(struct ifnet *ifp, struct hn_tx_ring *txr, struct hn_txdesc *txd,
 	pkt->rm_len = sizeof(*pkt) + m_head->m_pkthdr.len;
 	pkt->rm_dataoffset = sizeof(*pkt);
 	pkt->rm_datalen = m_head->m_pkthdr.len;
+	pkt->rm_oobdataoffset = 0;
+	pkt->rm_oobdatalen = 0;
+	pkt->rm_oobdataelements = 0;
 	pkt->rm_pktinfooffset = sizeof(*pkt);
 	pkt->rm_pktinfolen = 0;
+	pkt->rm_vchandle = 0;
+	pkt->rm_reserved = 0;
 
 	if (txr->hn_tx_flags & HN_TX_FLAG_HASHVAL) {
 		/*
