@@ -333,6 +333,9 @@ static bool			hn_tx_ring_pending(struct hn_tx_ring *);
 static void			hn_tx_ring_qflush(struct hn_tx_ring *);
 static void			hn_resume_tx(struct hn_softc *, int);
 static void			hn_set_txagg(struct hn_softc *);
+static void			*hn_try_txagg(struct ifnet *,
+				    struct hn_tx_ring *, struct hn_txdesc *,
+				    int);
 static int			hn_get_txswq_depth(const struct hn_tx_ring *);
 static void			hn_txpkt_done(struct hn_nvs_sendctx *,
 				    struct hn_softc *, struct vmbus_channel *,
@@ -1576,8 +1579,10 @@ hn_flush_txagg(struct ifnet *ifp, struct hn_tx_ring *txr)
 	 */
 	m = txd->m;
 	error = hn_txpkt(ifp, txr, txd);
-	if (error)
+	if (__predict_false(error)) {
+		/* txd is freed, but m is not. */
 		m_freem(m);
+	}
 
 	txr->hn_agg_txd = NULL;
 	txr->hn_agg_szleft = 0;
