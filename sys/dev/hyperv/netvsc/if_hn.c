@@ -752,9 +752,11 @@ done:
 	for (i = 0; i < sc->hn_tx_ring_cnt; ++i) {
 		struct hn_tx_ring *txr = &sc->hn_tx_ring[i];
 
+		mtx_lock(&txr->hn_tx_lock);
 		txr->hn_agg_szmax = size;
 		txr->hn_agg_pktmax = pkts;
 		txr->hn_agg_align = sc->hn_rndis_agg_align;
+		mtx_unlock(&txr->hn_tx_lock);
 	}
 }
 
