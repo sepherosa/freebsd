@@ -1343,6 +1343,7 @@ hn_txdesc_put(struct hn_tx_ring *txr, struct hn_txdesc *txd)
 		    ("chim txd uses dmamap"));
 		hn_chim_free(txr->hn_sc, txd->chim_index);
 		txd->chim_index = HN_NVS_CHIM_IDX_INVALID;
+		txd->chim_size = 0;
 	} else if (txd->flags & HN_TXD_FLAG_DMAMAP) {
 		bus_dmamap_sync(txr->hn_tx_data_dtag,
 		    txd->data_dmap, BUS_DMASYNC_POSTWRITE);
@@ -1399,6 +1400,7 @@ hn_txdesc_get(struct hn_tx_ring *txr)
 		KASSERT(txd->m == NULL && txd->refs == 0 &&
 		    STAILQ_EMPTY(&txd->agg_list) &&
 		    txd->chim_index == HN_NVS_CHIM_IDX_INVALID &&
+		    txd->chim_size == 0 &&
 		    (txd->flags & HN_TXD_FLAG_ONLIST) &&
 		    (txd->flags & HN_TXD_FLAG_ONAGG) == 0 &&
 		    (txd->flags & HN_TXD_FLAG_DMAMAP) == 0, ("invalid txd"));
@@ -1737,18 +1739,25 @@ hn_encap(struct ifnet *ifp, struct hn_tx_ring *txr, struct hn_txdesc *txd,
 	 * Fast path: Chimney sending.
 	 */
 	if (chim != NULL) {
-		KASSERT(txd->chim_index != HN_NVS_CHIM_IDX_INVALID,
-		    ("chimney buffer is not used"));
+		struct hn_txdesc *tgt_txd = txd;
+
+		if (txr->hn_agg_txd != NULL)
+			tgt_txd = txr->hn_agg_txd;
+
 		KASSERT(pkt == chim, ("RNDIS pkt not in chimney buffer"));
+		KASSERT(tgt_txd->chim_index != HN_NVS_CHIM_IDX_INVALID,
+		    ("chimney buffer is not used"));
+		tgt_txd->chim_size += pkt->rm_len;
 
 		m_copydata(m_head, 0, m_head->m_pkthdr.len,
 		    ((uint8_t *)chim) + pkt_hlen);
 
-		txd->chim_size = pkt->rm_len;
 		txr->hn_gpa_cnt = 0;
 		txr->hn_sendpkt = hn_txpkt_chim;
 		goto done;
 	}
+
+	KASSERT(txr->hn_agg_txd == NULL, ("aggregating sglist txdesc"));
 	KASSERT(txd->chim_index == HN_NVS_CHIM_IDX_INVALID,
 	    ("chimney buffer is used"));
 	KASSERT(pkt == txd->rndis_pkt, ("RNDIS pkt not in txdesc"));
