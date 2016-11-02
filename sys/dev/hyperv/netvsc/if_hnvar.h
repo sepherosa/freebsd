@@ -125,14 +125,17 @@ struct hn_tx_ring {
 	bus_dma_tag_t	hn_tx_data_dtag;
 	uint64_t	hn_csum_assist;
 
+	/* Applied packet transmission aggregation limits. */
 	int		hn_agg_szmax;
 	short		hn_agg_pktmax;
 	short		hn_agg_align;
 
+	/* Packet transmission aggregation states. */
 	struct hn_txdesc *hn_agg_txd;
 	int		hn_agg_szleft;
 	short		hn_agg_pktleft;
 	struct rndis_packet_msg *hn_agg_prevpkt;
+
 	/* Temporary stats for each sends. */
 	int		hn_stat_size;
 	short		hn_stat_pkts;
@@ -194,8 +197,9 @@ struct hn_softc {
 	uint32_t	hn_nvs_ver;
 	uint32_t	hn_rx_filter;
 
-	int			hn_agg_size;	/* user setting */
-	int			hn_agg_pkts;	/* user setting */
+	/* Packet transmission aggregation user settings. */
+	int			hn_agg_size;
+	int			hn_agg_pkts;
 
 	struct taskqueue	*hn_mgmt_taskq;
 	struct taskqueue	*hn_mgmt_taskq0;
