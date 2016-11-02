@@ -1568,20 +1568,29 @@ hn_flush_txagg(struct ifnet *ifp, struct hn_tx_ring *txr)
 {
 	struct hn_txdesc *txd;
 	struct mbuf *m;
-	int error;
+	int error, pkts;
 
 	txd = txr->hn_agg_txd;
 	KASSERT(txd != NULL, ("no aggregate txdesc"));
 
 	/*
-	 * Since txd's mbuf will not be freed upon error,
-	 * save it for later free if error ever happens.
+	 * Since hn_txpkt() will reset this temporary stat, save
+	 * it now, so that oerrors can be updated properly, if
+	 * hn_txpkt() ever fails.
+	 */
+	pkts = txr->hn_stat_pkts;
+
+	/*
+	 * Since txd's mbuf will _not_ be freed upon hn_txpkt()
+	 * failure, save it for later freeing, if hn_txpkt() ever
+	 * fails.
 	 */
 	m = txd->m;
 	error = hn_txpkt(ifp, txr, txd);
 	if (__predict_false(error)) {
 		/* txd is freed, but m is not. */
 		m_freem(m);
+		if_inc_counter(ifp, IFCOUNTER_OERRORS, pkts);
 	}
 
 	txr->hn_agg_txd = NULL;
@@ -1809,7 +1818,7 @@ hn_encap(struct ifnet *ifp, struct hn_tx_ring *txr, struct hn_txdesc *txd,
 		    ("fail to free txd upon txdma error"));
 
 		txr->hn_txdma_failed++;
-		if_inc_counter(txr->hn_sc->hn_ifp, IFCOUNTER_OERRORS, 1);
+		if_inc_counter(ifp, IFCOUNTER_OERRORS, 1);
 		return error;
 	}
 	*m_head0 = m_head;
