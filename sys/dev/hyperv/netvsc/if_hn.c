@@ -1426,7 +1426,7 @@ hn_txdesc_agg(struct hn_txdesc *agg_txd, struct hn_txdesc *txd)
 
 	KASSERT((txd->flags & HN_TXD_FLAG_ONAGG) == 0,
 	    ("already aggregated"));
-	KASSERT(STAILQ_EMPTY(txd->agg_list), ("recursive aggregation2"));
+	KASSERT(STAILQ_EMPTY(&txd->agg_list), ("recursive aggregation2"));
 
 	txd->flags |= HN_TXD_FLAG_ONAGG;
 	STAILQ_INSERT_TAIL(&agg_txd->agg_list, txd, agg_link);
