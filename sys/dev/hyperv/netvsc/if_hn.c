@@ -448,12 +448,12 @@ SYSCTL_UINT(_hw_hn, OID_AUTO, lro_mbufq_depth, CTLFLAG_RDTUN,
     &hn_lro_mbufq_depth, 0, "Depth of LRO mbuf queue");
 #endif
 
-/* Packet transmit aggregation size limit */
+/* Packet transmission aggregation size limit */
 static int			hn_tx_agg_size = -1;
 SYSCTL_UINT(_hw_hn, OID_AUTO, tx_agg_size, CTLFLAG_RDTUN,
     &hn_tx_agg_size, 0, "Packet transmission aggregation size limit");
 
-/* Packet transmit aggregation count limit */
+/* Packet transmission aggregation count limit */
 static int			hn_tx_agg_pkts = 0;
 SYSCTL_UINT(_hw_hn, OID_AUTO, tx_agg_pkts, CTLFLAG_RDTUN,
     &hn_tx_agg_pkts, 0, "Packet transmission aggregation packet limit");
@@ -714,7 +714,7 @@ hn_set_txagg(struct hn_softc *sc)
 	if (size > INT_MAX)
 		size = INT_MAX;
 
-	/* NOTE: We only aggregate packets using chimney send buffers. */
+	/* NOTE: We only aggregate packets using chimney sending buffers. */
 	if (size > (uint32_t)sc->hn_chim_szmax)
 		size = sc->hn_chim_szmax;
 
@@ -1053,13 +1053,13 @@ hn_attach(device_t dev)
 	    hn_rss_ind_sysctl, "IU", "RSS indirect table");
 	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "rndis_agg_size",
 	    CTLFLAG_RD, &sc->hn_rndis_agg_size, 0,
-	    "RNDIS offered packet aggregation size limit");
+	    "RNDIS offered packet transmission aggregation size limit");
 	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "rndis_agg_pkts",
 	    CTLFLAG_RD, &sc->hn_rndis_agg_pkts, 0,
-	    "RNDIS offered packet aggregation count limit");
+	    "RNDIS offered packet transmission aggregation count limit");
 	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "rndis_agg_align",
 	    CTLFLAG_RD, &sc->hn_rndis_agg_align, 0,
-	    "RNDIS packet aggregation alignment");
+	    "RNDIS packet transmission aggregation alignment");
 	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "agg_size",
 	    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_MPSAFE, sc, 0,
 	    hn_txagg_size_sysctl, "I",
@@ -1333,15 +1333,17 @@ hn_txdesc_put(struct hn_tx_ring *txr, struct hn_txdesc *txd)
 			int freed;
 
 			KASSERT(STAILQ_EMPTY(&tmp_txd->agg_list),
-			    ("resursive aggregation"));
+			    ("resursive aggregation on aggregated txdesc"));
 			KASSERT((tmp_txd->flags & HN_TXD_FLAG_ONAGG),
 			    ("not aggregated txdesc"));
 			KASSERT((tmp_txd->flags & HN_TXD_FLAG_DMAMAP) == 0,
 			    ("aggregated txdesc uses dmamap"));
 			KASSERT(tmp_txd->chim_index == HN_NVS_CHIM_IDX_INVALID,
-			    ("aggregated txdesc consumes chimney buffer"));
+			    ("aggregated txdesc consumes "
+			     "chimney sending buffer"));
 			KASSERT(tmp_txd->chim_size == 0,
-			    ("aggregated txdesc non-zero chimney buffer size"));
+			    ("aggregated txdesc has non-zero "
+			     "chimney sending size"));
 
 			STAILQ_REMOVE_HEAD(&txd->agg_list, agg_link);
 			tmp_txd->flags &= ~HN_TXD_FLAG_ONAGG;
@@ -1436,11 +1438,12 @@ hn_txdesc_agg(struct hn_txdesc *agg_txd, struct hn_txdesc *txd)
 {
 
 	KASSERT((agg_txd->flags & HN_TXD_FLAG_ONAGG) == 0,
-	    ("recursive aggregation1"));
+	    ("recursive aggregation on aggregating txdesc"));
 
 	KASSERT((txd->flags & HN_TXD_FLAG_ONAGG) == 0,
 	    ("already aggregated"));
-	KASSERT(STAILQ_EMPTY(&txd->agg_list), ("recursive aggregation2"));
+	KASSERT(STAILQ_EMPTY(&txd->agg_list),
+	    ("recursive aggregation on to-be-aggregated txdesc"));
 
 	txd->flags |= HN_TXD_FLAG_ONAGG;
 	STAILQ_INSERT_TAIL(&agg_txd->agg_list, txd, agg_link);
