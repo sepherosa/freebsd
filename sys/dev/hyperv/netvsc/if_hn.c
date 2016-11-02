@@ -1590,6 +1590,8 @@ hn_flush_txagg(struct ifnet *ifp, struct hn_tx_ring *txr)
 	if (__predict_false(error)) {
 		/* txd is freed, but m is not. */
 		m_freem(m);
+
+		txr->hn_flush_failed++;
 		if_inc_counter(ifp, IFCOUNTER_OERRORS, pkts);
 	}
 
@@ -1804,7 +1806,7 @@ hn_encap(struct ifnet *ifp, struct hn_tx_ring *txr, struct hn_txdesc *txd,
 	KASSERT(pkt == txd->rndis_pkt, ("RNDIS pkt not in txdesc"));
 
 	error = hn_txdesc_dmamap_load(txr, txd, &m_head, segs, &nsegs);
-	if (error) {
+	if (__predict_false(error)) {
 		int freed;
 
 		/*
@@ -3528,6 +3530,11 @@ hn_create_tx_data(struct hn_softc *sc, int ring_cnt)
 	    CTLTYPE_ULONG | CTLFLAG_RW | CTLFLAG_MPSAFE, sc,
 	    __offsetof(struct hn_tx_ring, hn_txdma_failed),
 	    hn_tx_stat_ulong_sysctl, "LU", "# of TX DMA failure");
+	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "agg_flush_failed",
+	    CTLTYPE_ULONG | CTLFLAG_RW | CTLFLAG_MPSAFE, sc,
+	    __offsetof(struct hn_tx_ring, hn_flush_failed),
+	    hn_tx_stat_ulong_sysctl, "LU",
+	    "# of packet transmission aggregation flush failure");
 	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "tx_collapsed",
 	    CTLTYPE_ULONG | CTLFLAG_RW | CTLFLAG_MPSAFE, sc,
 	    __offsetof(struct hn_tx_ring, hn_tx_collapsed),

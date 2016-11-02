@@ -154,6 +154,7 @@ struct hn_tx_ring {
 	u_long		hn_tx_chimney;
 	u_long		hn_pkts;
 	u_long		hn_sends;
+	u_long		hn_flush_failed;
 
 	/* Rarely used stuffs */
 	struct hn_txdesc *hn_txdesc;
