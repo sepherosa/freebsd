@@ -170,11 +170,11 @@ struct hn_txdesc {
 	SLIST_ENTRY(hn_txdesc)		link;
 #endif
 	STAILQ_ENTRY(hn_txdesc)		agg_link;
-	/*
-	 * Aggregated txdescs, in sending order.
-	 */
+
+	/* Aggregated txdescs, in sending order. */
 	STAILQ_HEAD(, hn_txdesc)	agg_list;
 
+	/* The oldest packet, if transmission aggregation happens. */
 	struct mbuf			*m;
 	struct hn_tx_ring		*txr;
 	int				refs;
@@ -1598,12 +1598,14 @@ hn_try_txagg(struct ifnet *ifp, struct hn_tx_ring *txr, struct hn_txdesc *txd,
 			int olen;
 
 			/*
-			 * Update the previous RNDIS packet size, it can be
-			 * increased due to alignment padding for this RNDIS
-			 * packet.  And update the aggregated txdesc's chimney
-			 * sending buffer size accordingly.
+			 * Update the previous RNDIS packet's total length,
+			 * it can be increased due to the mandatory alignment
+			 * padding for this RNDIS packet.  And update the
+			 * aggregating txdesc's chimney sending buffer size
+			 * accordingly.
 			 *
-			 * XXX zero-out the padding.
+			 * XXX
+			 * Zero-out the padding, as required by the RNDIS spec.
 			 */
 			olen = pkt->rm_len;
 			pkt->rm_len = roundup2(olen, txr->hn_agg_align);
@@ -1622,7 +1624,7 @@ hn_try_txagg(struct ifnet *ifp, struct hn_tx_ring *txr, struct hn_txdesc *txd,
 			    HN_PKTSIZE_MIN(txr->hn_agg_align)) {
 				/*
 				 * Probably can't aggregate more packets,
-				 * flush this aggregated packet proactively.
+				 * flush this aggregating txdesc proactively.
 				 */
 				txr->hn_agg_pktleft = 0;
 			}
@@ -1631,7 +1633,7 @@ hn_try_txagg(struct ifnet *ifp, struct hn_tx_ring *txr, struct hn_txdesc *txd,
 		}
 		hn_flush_txagg(ifp, txr);
 	}
-	KASSERT(txr->hn_agg_txd == NULL, ("lingering aggregated txdesc"));
+	KASSERT(txr->hn_agg_txd == NULL, ("lingering aggregating txdesc"));
 
 	txr->hn_tx_chimney_tried++;
 	txd->chim_index = hn_chim_alloc(txr->hn_sc);
@@ -1768,9 +1770,10 @@ hn_encap(struct ifnet *ifp, struct hn_tx_ring *txr, struct hn_txdesc *txd,
 #endif
 		}
 
-		KASSERT(pkt == chim, ("RNDIS pkt not in chimney buffer"));
+		KASSERT(pkt == chim,
+		    ("RNDIS pkt not in chimney sending buffer"));
 		KASSERT(tgt_txd->chim_index != HN_NVS_CHIM_IDX_INVALID,
-		    ("chimney buffer is not used"));
+		    ("chimney sending buffer is not used"));
 		tgt_txd->chim_size += pkt->rm_len;
 
 		m_copydata(m_head, 0, m_head->m_pkthdr.len,
@@ -1856,8 +1859,8 @@ hn_txpkt(struct ifnet *ifp, struct hn_tx_ring *txr, struct hn_txdesc *txd)
 
 again:
 	/*
-	 * Make sure that txd and any aggregated txds are not freed before
-	 * ETHER_BPF_MTAP.
+	 * Make sure that this txd and any aggregated txds are not freed
+	 * before ETHER_BPF_MTAP.
 	 */
 	hn_txdesc_hold(txd);
 	error = txr->hn_sendpkt(txr, txd);
@@ -3734,14 +3737,14 @@ hn_start_locked(struct hn_tx_ring *txr, int len)
 		if (error) {
 			/* Both txd and m_head are freed */
 			KASSERT(txr->hn_agg_txd == NULL,
-			    ("encap failed w/ pending aggregated txdesc"));
+			    ("encap failed w/ pending aggregating txdesc"));
 			continue;
 		}
 
 		if (txr->hn_agg_pktleft == 0) {
 			if (txr->hn_agg_txd != NULL) {
 				KASSERT(m_head == NULL,
-				    ("pending mbuf for aggregated txdesc"));
+				    ("pending mbuf for aggregating txdesc"));
 				hn_flush_txagg(ifp, txr);
 				/* XXX check error */
 			} else {
@@ -3758,10 +3761,10 @@ hn_start_locked(struct hn_tx_ring *txr, int len)
 		}
 #ifdef INVARIANTS
 		else {
-			KASSERT(m_head == NULL,
-			    ("pending mbuf for aggregation"));
 			KASSERT(txr->hn_agg_txd != NULL,
-			    ("no aggregated txdesc"));
+			    ("no aggregating txdesc"));
+			KASSERT(m_head == NULL,
+			    ("pending mbuf for aggregating txdesc"));
 		}
 #endif
 	}
@@ -3888,7 +3891,7 @@ hn_xmit(struct hn_tx_ring *txr, int len)
 		if (error) {
 			/* Both txd and m_head are freed; discard */
 			KASSERT(txr->hn_agg_txd == NULL,
-			    ("encap failed w/ pending aggregated txdesc"));
+			    ("encap failed w/ pending aggregating txdesc"));
 			drbr_advance(ifp, txr->hn_mbuf_br);
 			continue;
 		}
@@ -3896,7 +3899,7 @@ hn_xmit(struct hn_tx_ring *txr, int len)
 		if (txr->hn_agg_pktleft == 0) {
 			if (txr->hn_agg_txd != NULL) {
 				KASSERT(m_head == NULL,
-				    ("pending mbuf for aggregated txdesc"));
+				    ("pending mbuf for aggregating txdesc"));
 				hn_flush_txagg(ifp, txr);
 				/* XXX check error */
 			} else {
@@ -3913,10 +3916,10 @@ hn_xmit(struct hn_tx_ring *txr, int len)
 		}
 #ifdef INVARIANTS
 		else {
-			KASSERT(m_head == NULL,
-			    ("pending mbuf for aggregation"));
 			KASSERT(txr->hn_agg_txd != NULL,
-			    ("no aggregated txdesc"));
+			    ("no aggregating txdesc"));
+			KASSERT(m_head == NULL,
+			    ("pending mbuf for aggregating txdesc"));
 		}
 #endif
 
