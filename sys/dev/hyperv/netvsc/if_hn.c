@@ -1563,7 +1563,7 @@ hn_rndis_pktinfo_append(struct rndis_packet_msg *pkt, size_t pktsize,
 	return (pi->rm_data);
 }
 
-static __inline void
+static __inline int
 hn_flush_txagg(struct ifnet *ifp, struct hn_tx_ring *txr)
 {
 	struct hn_txdesc *txd;
@@ -1595,10 +1595,13 @@ hn_flush_txagg(struct ifnet *ifp, struct hn_tx_ring *txr)
 		if_inc_counter(ifp, IFCOUNTER_OERRORS, pkts);
 	}
 
+	/* Reset all aggregation states. */
 	txr->hn_agg_txd = NULL;
 	txr->hn_agg_szleft = 0;
 	txr->hn_agg_pktleft = 0;
 	txr->hn_agg_prevpkt = NULL;
+
+	return (error);
 }
 
 static void *
@@ -3766,8 +3769,12 @@ hn_start_locked(struct hn_tx_ring *txr, int len)
 			if (txr->hn_agg_txd != NULL) {
 				KASSERT(m_head == NULL,
 				    ("pending mbuf for aggregating txdesc"));
-				hn_flush_txagg(ifp, txr);
-				/* XXX check error */
+				error = hn_flush_txagg(ifp, txr);
+				if (__predict_false(error)) {
+					atomic_set_int(&ifp->if_drv_flags,
+					    IFF_DRV_OACTIVE);
+					break;
+				}
 			} else {
 				KASSERT(m_head != NULL, ("mbuf was freed"));
 				error = hn_txpkt(ifp, txr, txd);
@@ -3921,8 +3928,11 @@ hn_xmit(struct hn_tx_ring *txr, int len)
 			if (txr->hn_agg_txd != NULL) {
 				KASSERT(m_head == NULL,
 				    ("pending mbuf for aggregating txdesc"));
-				hn_flush_txagg(ifp, txr);
-				/* XXX check error */
+				error = hn_flush_txagg(ifp, txr);
+				if (__predict_false(error)) {
+					txr->hn_oactive = 1;
+					break;
+				}
 			} else {
 				KASSERT(m_head != NULL, ("mbuf was freed"));
 				error = hn_txpkt(ifp, txr, txd);
