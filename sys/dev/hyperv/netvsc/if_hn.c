@@ -706,7 +706,7 @@ hn_set_txagg(struct hn_softc *sc)
 	if (sc->hn_rndis_agg_size < size)
 		size = sc->hn_rndis_agg_size;
 
-	if (size <= HN_PKTSIZE_MIN(sc->hn_rndis_agg_align)) {
+	if (size <= 2 * HN_PKTSIZE_MIN(sc->hn_rndis_agg_align)) {
 		/* Disable */
 		size = 0;
 		pkts = 0;
