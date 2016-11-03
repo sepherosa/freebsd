@@ -1899,7 +1899,7 @@ again:
 		{
 			if_inc_counter(ifp, IFCOUNTER_OBYTES,
 			    txr->hn_stat_size);
-			if (txd->m->m_flags & M_MCAST) {
+			if (txr->hn_stat_mcasts != 0) {
 				if_inc_counter(ifp, IFCOUNTER_OMCASTS,
 				    txr->hn_stat_mcasts);
 			}
@@ -1946,9 +1946,11 @@ again:
 		txr->hn_send_failed++;
 	}
 
+	/* Reset temporary stats, after this sending is done. */
 	txr->hn_stat_size = 0;
 	txr->hn_stat_pkts = 0;
 	txr->hn_stat_mcasts = 0;
+
 	return (error);
 }
 
