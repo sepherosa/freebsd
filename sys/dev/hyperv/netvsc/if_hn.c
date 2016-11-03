@@ -453,12 +453,12 @@ SYSCTL_UINT(_hw_hn, OID_AUTO, lro_mbufq_depth, CTLFLAG_RDTUN,
 
 /* Packet transmission aggregation size limit */
 static int			hn_tx_agg_size = -1;
-SYSCTL_UINT(_hw_hn, OID_AUTO, tx_agg_size, CTLFLAG_RDTUN,
+SYSCTL_INT(_hw_hn, OID_AUTO, tx_agg_size, CTLFLAG_RDTUN,
     &hn_tx_agg_size, 0, "Packet transmission aggregation size limit");
 
 /* Packet transmission aggregation count limit */
 static int			hn_tx_agg_pkts = 0;
-SYSCTL_UINT(_hw_hn, OID_AUTO, tx_agg_pkts, CTLFLAG_RDTUN,
+SYSCTL_INT(_hw_hn, OID_AUTO, tx_agg_pkts, CTLFLAG_RDTUN,
     &hn_tx_agg_pkts, 0, "Packet transmission aggregation packet limit");
 
 static u_int			hn_cpu_index;	/* next CPU for channel */
