@@ -182,6 +182,7 @@ struct hn_softc {
 
 	int		hn_tx_ring_cnt;
 	int		hn_tx_ring_inuse;
+	uint32_t	hn_tx_ehash_key;
 	struct hn_tx_ring *hn_tx_ring;
 
 	uint8_t		*hn_chim;
