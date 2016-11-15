@@ -168,9 +168,9 @@ vmbus_xact_ctx_orphan(struct vmbus_xact_ctx *ctx)
 	}
 	ctx->xc_flags |= VMBUS_XACT_CTXF_DESTROY;
 	mtx_unlock(&ctx->xc_lock);
-	wakeup(&ctx->xc_free);
 
-	/* TODO: wakeup active */
+	wakeup(&ctx->xc_free);
+	wakeup(&ctx->xc_active);
 
 	ctx->xc_orphan = vmbus_xact_get1(ctx, 0);
 	if (ctx->xc_orphan == NULL)
@@ -287,7 +287,8 @@ vmbus_xact_wait1(struct vmbus_xact *xact, size_t *resp_len,
 	mtx_lock(&ctx->xc_lock);
 
 	KASSERT(ctx->xc_active == xact, ("xact mismatch"));
-	while (xact->x_resp == NULL) {
+	while (xact->x_resp == NULL &&
+	    (ctx->xc_flags & VMBUS_XACT_CTXF_DESTROY) == 0) {
 		if (can_sleep) {
 			mtx_sleep(&ctx->xc_active, &ctx->xc_lock, 0,
 			    "wxact", 0);
@@ -297,6 +298,20 @@ vmbus_xact_wait1(struct vmbus_xact *xact, size_t *resp_len,
 			mtx_lock(&ctx->xc_lock);
 		}
 	}
+	KASSERT(ctx->xc_active == xact, ("xact trashed"));
+
+	if ((ctx->xc_flags & VMBUS_XACT_CTXF_DESTROY) && xact->x_resp == NULL) {
+		uint8_t b = 0;
+
+		/*
+		 * Orphaned and no response was received yet; fake up
+		 * an one byte response.
+		 */
+		printf("vmbus: xact ctx was orphaned w/ pending xact\n");
+		vmbus_xact_save_resp(ctx->xc_active, &b, sizeof(b));
+	}
+	KASSERT(xact->x_resp != NULL, ("no response"));
+
 	ctx->xc_active = NULL;
 
 	resp = xact->x_resp;
@@ -345,19 +360,47 @@ void
 vmbus_xact_wakeup(struct vmbus_xact *xact, const void *data, size_t dlen)
 {
 	struct vmbus_xact_ctx *ctx = xact->x_ctx;
+	int do_wakeup = 0;
 
 	mtx_lock(&ctx->xc_lock);
-	vmbus_xact_save_resp(xact, data, dlen);
+	/*
+	 * NOTE:
+	 * xc_active could be NULL, if the ctx has been orphaned.
+	 */
+	if (ctx->xc_active != NULL) {
+		vmbus_xact_save_resp(xact, data, dlen);
+		do_wakeup = 1;
+	} else {
+		KASSERT(ctx->xc_flags & VMBUS_XACT_CTXF_DESTROY,
+		    ("no active xact pending"));
+		printf("vmbus: drop xact response\n");
+	}
 	mtx_unlock(&ctx->xc_lock);
-	wakeup(&ctx->xc_active);
+
+	if (do_wakeup)
+		wakeup(&ctx->xc_active);
 }
 
 void
 vmbus_xact_ctx_wakeup(struct vmbus_xact_ctx *ctx, const void *data, size_t dlen)
 {
+	int do_wakeup = 0;
+
 	mtx_lock(&ctx->xc_lock);
-	KASSERT(ctx->xc_active != NULL, ("no pending xact"));
-	vmbus_xact_save_resp(ctx->xc_active, data, dlen);
+	/*
+	 * NOTE:
+	 * xc_active could be NULL, if the ctx has been orphaned.
+	 */
+	if (ctx->xc_active != NULL) {
+		vmbus_xact_save_resp(ctx->xc_active, data, dlen);
+		do_wakeup = 1;
+	} else {
+		KASSERT(ctx->xc_flags & VMBUS_XACT_CTXF_DESTROY,
+		    ("no active xact pending"));
+		printf("vmbus: drop xact response\n");
+	}
 	mtx_unlock(&ctx->xc_lock);
-	wakeup(&ctx->xc_active);
+
+	if (do_wakeup)
+		wakeup(&ctx->xc_active);
 }
