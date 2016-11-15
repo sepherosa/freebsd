@@ -61,6 +61,7 @@ struct vmbus_xact_ctx {
 	uint32_t			xc_flags;	/* VMBUS_XACT_CTXF_ */
 	struct vmbus_xact		*xc_free;
 	struct vmbus_xact		*xc_active;
+	struct vmbus_xact		*xc_orphan;
 };
 
 #define VMBUS_XACT_CTXF_DESTROY		0x0001
@@ -72,6 +73,8 @@ static struct vmbus_xact	*vmbus_xact_get1(struct vmbus_xact_ctx *,
 				    uint32_t);
 const void			*vmbus_xact_wait1(struct vmbus_xact *, size_t *,
 				    bool);
+static void			vmbus_xact_save_resp(struct vmbus_xact *,
+				    const void *, size_t);
 
 static struct vmbus_xact *
 vmbus_xact_alloc(struct vmbus_xact_ctx *ctx, bus_dma_tag_t parent_dtag)
@@ -152,23 +155,45 @@ vmbus_xact_ctx_create(bus_dma_tag_t dtag, size_t req_size, size_t resp_size,
 	return (ctx);
 }
 
-void
-vmbus_xact_ctx_destroy(struct vmbus_xact_ctx *ctx)
+bool
+vmbus_xact_ctx_orphan(struct vmbus_xact_ctx *ctx)
 {
-	struct vmbus_xact *xact;
-
 	mtx_lock(&ctx->xc_lock);
+	if (ctx->xc_flags & VMBUS_XACT_CTXF_DESTROY) {
+		mtx_unlock(&ctx->xc_lock);
+		return (false);
+	}
 	ctx->xc_flags |= VMBUS_XACT_CTXF_DESTROY;
 	mtx_unlock(&ctx->xc_lock);
 	wakeup(&ctx->xc_free);
 
-	xact = vmbus_xact_get1(ctx, 0);
-	if (xact == NULL)
-		panic("can't get xact");
+	/* TODO: wakeup active */
 
-	vmbus_xact_free(xact);
+	ctx->xc_orphan = vmbus_xact_get1(ctx, 0);
+	if (ctx->xc_orphan == NULL)
+		panic("can't get xact");
+	return (true);
+}
+
+void
+vmbus_xact_ctx_free(struct vmbus_xact_ctx *ctx)
+{
+	KASSERT(ctx->xc_flags & VMBUS_XACT_CTXF_DESTROY,
+	    ("xact ctx was not orphaned"));
+	KASSERT(ctx->xc_orphan != NULL, ("no orphaned xact"));
+
+	vmbus_xact_free(ctx->xc_orphan);
 	mtx_destroy(&ctx->xc_lock);
 	free(ctx, M_DEVBUF);
+}
+
+void
+vmbus_xact_ctx_destroy(struct vmbus_xact_ctx *ctx)
+{
+
+	if (!vmbus_xact_ctx_orphan(ctx))
+		panic("can't orphan xact ctx");
+	vmbus_xact_ctx_free(ctx);
 }
 
 struct vmbus_xact *
