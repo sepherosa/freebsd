@@ -4546,8 +4546,8 @@ hn_chan_drain(struct hn_softc *sc, struct vmbus_channel *chan)
 
 	/*
 	 * NOTE:
-	 * TX bufring will not be drained by the hypervisor, if the
-	 * primary channel is revoked.
+	 * The TX bufring will not be drained by the hypervisor,
+	 * if the primary channel is revoked.
 	 */
 	while (!vmbus_chan_rx_empty(chan) ||
 	    (!vmbus_chan_is_revoked(sc->hn_prichan) &&
