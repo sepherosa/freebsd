@@ -994,8 +994,25 @@ hn_attach(device_t dev)
 	 */
 	sc->hn_xact = vmbus_xact_ctx_create(bus_get_dma_tag(dev),
 	    HN_XACT_REQ_SIZE, HN_XACT_RESP_SIZE, 0);
-	if (sc->hn_xact == NULL)
+	if (sc->hn_xact == NULL) {
+		error = ENXIO;
 		goto failed;
+	}
+
+	/*
+	 * Install orphan handler for the revocation of this device's
+	 * primary channel.
+	 *
+	 * NOTE:
+	 * The processing order is critical here:
+	 * Install the orphan handler, _before_ testing whether this
+	 * device's primary channel has been revoked or not.
+	 */
+	vmbus_chan_set_orphan(sc->hn_prichan, sc->hn_xact);
+	if (vmbus_chan_is_revoked(sc->hn_prichan)) {
+		error = ENXIO;
+		goto failed;
+	}
 
 	/*
 	 * Attach the synthetic parts, i.e. NVS and RNDIS.
@@ -1170,6 +1187,14 @@ hn_detach(device_t dev)
 	struct hn_softc *sc = device_get_softc(dev);
 	struct ifnet *ifp = sc->hn_ifp;
 
+	if (sc->hn_xact != NULL && vmbus_chan_is_revoked(sc->hn_prichan)) {
+		/*
+		 * In case that the vmbus missed the orphan handler
+		 * installation.
+		 */
+		vmbus_xact_ctx_orphan(sc->hn_xact);
+	}
+
 	if (device_is_attached(dev)) {
 		HN_LOCK(sc);
 		if (sc->hn_flags & HN_FLAG_SYNTH_ATTACHED) {
@@ -1195,8 +1220,14 @@ hn_detach(device_t dev)
 		taskqueue_free(sc->hn_tx_taskq);
 	taskqueue_free(sc->hn_mgmt_taskq0);
 
-	if (sc->hn_xact != NULL)
+	if (sc->hn_xact != NULL) {
+		/*
+		 * Uninstall the orphan handler _before_ the xact is
+		 * destructed.
+		 */
+		vmbus_chan_unset_orphan(sc->hn_prichan);
 		vmbus_xact_ctx_destroy(sc->hn_xact);
+	}
 
 	if_free(ifp);
 
