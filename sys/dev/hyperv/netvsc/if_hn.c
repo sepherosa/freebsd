@@ -303,7 +303,8 @@ static void			hn_resume(struct hn_softc *);
 static void			hn_resume_data(struct hn_softc *);
 static void			hn_resume_mgmt(struct hn_softc *);
 static void			hn_suspend_mgmt_taskfunc(void *, int);
-static void			hn_chan_drain(struct vmbus_channel *);
+static void			hn_chan_drain(struct hn_softc *,
+				    struct vmbus_channel *);
 
 static void			hn_update_link_status(struct hn_softc *);
 static void			hn_change_network(struct hn_softc *);
@@ -4540,10 +4541,17 @@ hn_set_ring_inuse(struct hn_softc *sc, int ring_cnt)
 }
 
 static void
-hn_chan_drain(struct vmbus_channel *chan)
+hn_chan_drain(struct hn_softc *sc, struct vmbus_channel *chan)
 {
 
-	while (!vmbus_chan_rx_empty(chan) || !vmbus_chan_tx_empty(chan))
+	/*
+	 * NOTE:
+	 * TX bufring will not be drained by the hypervisor, if the
+	 * primary channel is revoked.
+	 */
+	while (!vmbus_chan_rx_empty(chan) ||
+	    (!vmbus_chan_is_revoked(sc->hn_prichan) &&
+	     !vmbus_chan_tx_empty(chan)))
 		pause("waitch", 1);
 	vmbus_chan_intr_drain(chan);
 }
@@ -4552,6 +4560,7 @@ static void
 hn_suspend_data(struct hn_softc *sc)
 {
 	struct vmbus_channel **subch = NULL;
+	struct hn_tx_ring *txr;
 	int i, nsubch;
 
 	HN_LOCK_ASSERT(sc);
@@ -4560,19 +4569,23 @@ hn_suspend_data(struct hn_softc *sc)
 	 * Suspend TX.
 	 */
 	for (i = 0; i < sc->hn_tx_ring_inuse; ++i) {
-		struct hn_tx_ring *txr = &sc->hn_tx_ring[i];
+		txr = &sc->hn_tx_ring[i];
 
 		mtx_lock(&txr->hn_tx_lock);
 		txr->hn_suspended = 1;
 		mtx_unlock(&txr->hn_tx_lock);
 		/* No one is able send more packets now. */
 
-		/* Wait for all pending sends to finish. */
-		while (hn_tx_ring_pending(txr))
+		/*
+		 * Wait for all pending sends to finish.
+		 *
+		 * NOTE:
+		 * We will _not_ receive all pending send-done, if the
+		 * primary channel is revoked.
+		 */
+		while (hn_tx_ring_pending(txr) &&
+		    !vmbus_chan_is_revoked(sc->hn_prichan))
 			pause("hnwtx", 1 /* 1 tick */);
-
-		taskqueue_drain(txr->hn_tx_taskq, &txr->hn_tx_task);
-		taskqueue_drain(txr->hn_tx_taskq, &txr->hn_txeof_task);
 	}
 
 	/*
@@ -4595,12 +4608,27 @@ hn_suspend_data(struct hn_softc *sc)
 
 	if (subch != NULL) {
 		for (i = 0; i < nsubch; ++i)
-			hn_chan_drain(subch[i]);
+			hn_chan_drain(sc, subch[i]);
 	}
-	hn_chan_drain(sc->hn_prichan);
+	hn_chan_drain(sc, sc->hn_prichan);
 
 	if (subch != NULL)
 		vmbus_subchan_rel(subch, nsubch);
+
+	/*
+	 * Drain any pending TX tasks.
+	 *
+	 * NOTE:
+	 * The above hn_chan_drain() can dispatch TX tasks, so the TX
+	 * tasks will have to be drained _after_ the above hn_chan_drain()
+	 * calls.
+	 */
+	for (i = 0; i < sc->hn_tx_ring_inuse; ++i) {
+		txr = &sc->hn_tx_ring[i];
+
+		taskqueue_drain(txr->hn_tx_taskq, &txr->hn_tx_task);
+		taskqueue_drain(txr->hn_tx_taskq, &txr->hn_txeof_task);
+	}
 }
 
 static void
