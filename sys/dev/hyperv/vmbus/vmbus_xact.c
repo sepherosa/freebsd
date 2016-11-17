@@ -75,6 +75,7 @@ const void			*vmbus_xact_wait1(struct vmbus_xact *, size_t *,
 				    bool);
 static void			vmbus_xact_save_resp(struct vmbus_xact *,
 				    const void *, size_t);
+static void			vmbus_xact_ctx_free(struct vmbus_xact_ctx *);
 
 static struct vmbus_xact *
 vmbus_xact_alloc(struct vmbus_xact_ctx *ctx, bus_dma_tag_t parent_dtag)
@@ -178,7 +179,7 @@ vmbus_xact_ctx_orphan(struct vmbus_xact_ctx *ctx)
 	return (true);
 }
 
-void
+static void
 vmbus_xact_ctx_free(struct vmbus_xact_ctx *ctx)
 {
 	KASSERT(ctx->xc_flags & VMBUS_XACT_CTXF_DESTROY,
@@ -194,8 +195,7 @@ void
 vmbus_xact_ctx_destroy(struct vmbus_xact_ctx *ctx)
 {
 
-	if (!vmbus_xact_ctx_orphan(ctx))
-		panic("can't orphan xact ctx");
+	vmbus_xact_ctx_orphan(ctx);
 	vmbus_xact_ctx_free(ctx);
 }
 
