@@ -328,6 +328,8 @@ static int			hn_create_tx_data(struct hn_softc *, int);
 static void			hn_fixup_tx_data(struct hn_softc *);
 static void			hn_destroy_tx_data(struct hn_softc *);
 static void			hn_txdesc_dmamap_destroy(struct hn_txdesc *);
+static void			hn_txdesc_gc(struct hn_tx_ring *,
+				    struct hn_txdesc *);
 static int			hn_encap(struct ifnet *, struct hn_tx_ring *,
 				    struct hn_txdesc *, struct mbuf **);
 static int			hn_txpkt(struct ifnet *, struct hn_tx_ring *,
@@ -1467,7 +1469,7 @@ hn_txdesc_hold(struct hn_txdesc *txd)
 {
 
 	/* 0->1 transition will never work */
-	KASSERT(txd->refs > 0, ("invalid refs %d", txd->refs));
+	KASSERT(txd->refs > 0, ("invalid txd refs %d", txd->refs));
 	atomic_add_int(&txd->refs, 1);
 }
 
@@ -3481,24 +3483,43 @@ hn_txdesc_dmamap_destroy(struct hn_txdesc *txd)
 }
 
 static void
+hn_txdesc_gc(struct hn_tx_ring *txr, struct hn_txdesc *txd)
+{
+
+	KASSERT(txd->refs == 0 || txd->refs == 1,
+	    ("invalid txd refs %d", txd->refs));
+
+	/* Aggregated txds will be freed by their aggregating txd. */
+	if (txd->refs > 0 && (txd->flags & HN_TXD_FLAG_ONAGG) == 0) {
+		int freed;
+
+		freed = hn_txdesc_put(txr, txd);
+		KASSERT(freed, ("can't free txdesc"));
+	}
+}
+
+static void
 hn_tx_ring_destroy(struct hn_tx_ring *txr)
 {
-	struct hn_txdesc *txd;
+	int i;
 
 	if (txr->hn_txdesc == NULL)
 		return;
 
-#ifndef HN_USE_TXDESC_BUFRING
-	while ((txd = SLIST_FIRST(&txr->hn_txlist)) != NULL) {
-		SLIST_REMOVE_HEAD(&txr->hn_txlist, link);
-		hn_txdesc_dmamap_destroy(txd);
-	}
-#else
-	mtx_lock(&txr->hn_tx_lock);
-	while ((txd = buf_ring_dequeue_sc(txr->hn_txdesc_br)) != NULL)
-		hn_txdesc_dmamap_destroy(txd);
-	mtx_unlock(&txr->hn_tx_lock);
-#endif
+	/*
+	 * NOTE:
+	 * Because the freeing of aggregated txds will be defered
+	 * to the aggregating txd, two passes are used here:
+	 * - The first pass GCes any pending txds.  This GC is necessary,
+	 *   since if the channels are revoked, hypervisor will not
+	 *   deliver send-done for all pending txds.
+	 * - The second pass free the busdma stuffs, i.e. after all txds
+	 *   were freed.
+	 */
+	for (i = 0; i < txr->hn_txdesc_cnt; ++i)
+		hn_txdesc_gc(txr, &txr->hn_txdesc[i]);
+	for (i = 0; i < txr->hn_txdesc_cnt; ++i)
+		hn_txdesc_dmamap_destroy(&txr->hn_txdesc[i]);
 
 	if (txr->hn_tx_data_dtag != NULL)
 		bus_dma_tag_destroy(txr->hn_tx_data_dtag);
