@@ -3513,7 +3513,7 @@ hn_tx_ring_destroy(struct hn_tx_ring *txr)
 	 * - The first pass GCes any pending txds.  This GC is necessary,
 	 *   since if the channels are revoked, hypervisor will not
 	 *   deliver send-done for all pending txds.
-	 * - The second pass free the busdma stuffs, i.e. after all txds
+	 * - The second pass frees the busdma stuffs, i.e. after all txds
 	 *   were freed.
 	 */
 	for (i = 0; i < txr->hn_txdesc_cnt; ++i)
