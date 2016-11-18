@@ -3508,7 +3508,7 @@ hn_tx_ring_destroy(struct hn_tx_ring *txr)
 
 	/*
 	 * NOTE:
-	 * Because the freeing of aggregated txds will be defered
+	 * Because the freeing of aggregated txds will be deferred
 	 * to the aggregating txd, two passes are used here:
 	 * - The first pass GCes any pending txds.  This GC is necessary,
 	 *   since if the channels are revoked, hypervisor will not
