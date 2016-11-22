@@ -296,6 +296,7 @@ static int			hn_synth_attach(struct hn_softc *, int);
 static void			hn_synth_detach(struct hn_softc *);
 static int			hn_synth_alloc_subchans(struct hn_softc *,
 				    int *);
+static bool			hn_synth_attachable(const struct hn_softc *);
 static void			hn_suspend(struct hn_softc *);
 static void			hn_suspend_data(struct hn_softc *);
 static void			hn_suspend_mgmt(struct hn_softc *);
@@ -4391,6 +4392,15 @@ hn_synth_alloc_subchans(struct hn_softc *sc, int *nsubch)
 	return (0);
 }
 
+static bool
+hn_synth_attachable(const struct hn_softc *sc)
+{
+
+	if (sc->hn_flags & HN_FLAG_ERRORS)
+		return (false);
+	return (true);
+}
+
 static int
 hn_synth_attach(struct hn_softc *sc, int mtu)
 {
@@ -4400,6 +4410,9 @@ hn_synth_attach(struct hn_softc *sc, int mtu)
 
 	KASSERT((sc->hn_flags & HN_FLAG_SYNTH_ATTACHED) == 0,
 	    ("synthetic parts were attached"));
+
+	if (!hn_synth_attachable(sc))
+		return (ENXIO);
 
 	/* Save capabilities for later verification. */
 	old_caps = sc->hn_caps;
