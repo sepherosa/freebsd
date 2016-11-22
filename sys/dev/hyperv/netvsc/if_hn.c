@@ -4233,7 +4233,8 @@ static void
 hn_chan_detach(struct hn_softc *sc, struct vmbus_channel *chan)
 {
 	struct hn_rx_ring *rxr;
-	int idx;
+	struct hn_tx_ring *txr = NULL;
+	int idx, error;
 
 	idx = vmbus_chan_subidx(chan);
 
@@ -4249,8 +4250,7 @@ hn_chan_detach(struct hn_softc *sc, struct vmbus_channel *chan)
 	rxr->hn_rx_flags &= ~HN_RX_FLAG_ATTACHED;
 
 	if (idx < sc->hn_tx_ring_inuse) {
-		struct hn_tx_ring *txr = &sc->hn_tx_ring[idx];
-
+		txr = &sc->hn_tx_ring[idx];
 		KASSERT((txr->hn_tx_flags & HN_TX_FLAG_ATTACHED),
 		    ("TX ring %d is not attached attached", idx));
 		txr->hn_tx_flags &= ~HN_TX_FLAG_ATTACHED;
@@ -4262,7 +4262,18 @@ hn_chan_detach(struct hn_softc *sc, struct vmbus_channel *chan)
 	 * NOTE:
 	 * Channel closing does _not_ destroy the target channel.
 	 */
-	vmbus_chan_close(chan);
+	error = vmbus_chan_close_direct(chan);
+	if (error == EISCONN) {
+		if_printf(sc->hn_ifp, "chan%u subidx%u "
+		    "bufring is connected after being closed\n",
+		    vmbus_chan_id(chan), vmbus_chan_subidx(chan));
+		rxr->hn_rx_flags |= HN_RX_FLAG_BR_REF;
+		if (txr != NULL)
+			txr->hn_tx_flags |= HN_TX_FLAG_BR_REF;
+	} else if (error) {
+		if_printf(sc->hn_ifp, "chan%u subidx%u close failed: %d\n",
+		    vmbus_chan_id(chan), vmbus_chan_subidx(chan), error);
+	}
 }
 
 static int
