@@ -3249,7 +3249,10 @@ hn_destroy_rx_data(struct hn_softc *sc)
 	int i;
 
 	if (sc->hn_rxbuf != NULL) {
-		hyperv_dmamem_free(&sc->hn_rxbuf_dma, sc->hn_rxbuf);
+		if ((sc->hn_flags & HN_FLAG_RXBUF_REF) == 0)
+			hyperv_dmamem_free(&sc->hn_rxbuf_dma, sc->hn_rxbuf);
+		else
+			device_printf(sc->hn_dev, "RXBUF is referenced\n");
 		sc->hn_rxbuf = NULL;
 	}
 
@@ -3733,7 +3736,12 @@ hn_destroy_tx_data(struct hn_softc *sc)
 	int i;
 
 	if (sc->hn_chim != NULL) {
-		hyperv_dmamem_free(&sc->hn_chim_dma, sc->hn_chim);
+		if ((sc->hn_flags & HN_FLAG_CHIM_REF) == 0) {
+			hyperv_dmamem_free(&sc->hn_chim_dma, sc->hn_chim);
+		} else {
+			device_printf(sc->hn_dev,
+			    "chimney sending buffer is referenced");
+		}
 		sc->hn_chim = NULL;
 	}
 
