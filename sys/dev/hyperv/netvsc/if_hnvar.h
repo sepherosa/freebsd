@@ -238,6 +238,8 @@ struct hn_softc {
 #define HN_FLAG_HAS_RSSIND		0x0008
 #define HN_FLAG_SYNTH_ATTACHED		0x0010
 #define HN_FLAG_NO_SLEEPING		0x0020
+#define HN_FLAG_RXBUF_REF		0x0040
+#define HN_FLAG_CHIM_REF		0x0080
 
 #define HN_NO_SLEEPING(sc)			\
 do {						\
