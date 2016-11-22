@@ -3265,7 +3265,12 @@ hn_destroy_rx_data(struct hn_softc *sc)
 
 		if (rxr->hn_br == NULL)
 			continue;
-		hyperv_dmamem_free(&rxr->hn_br_dma, rxr->hn_br);
+		if ((rxr->hn_rx_flags & HN_RX_FLAG_BR_REF) == 0) {
+			hyperv_dmamem_free(&rxr->hn_br_dma, rxr->hn_br);
+		} else {
+			device_printf(sc->hn_dev,
+			    "%dth channel bufring is referenced", i);
+		}
 		rxr->hn_br = NULL;
 
 #if defined(INET) || defined(INET6)
@@ -4233,7 +4238,6 @@ static void
 hn_chan_detach(struct hn_softc *sc, struct vmbus_channel *chan)
 {
 	struct hn_rx_ring *rxr;
-	struct hn_tx_ring *txr = NULL;
 	int idx, error;
 
 	idx = vmbus_chan_subidx(chan);
@@ -4250,7 +4254,8 @@ hn_chan_detach(struct hn_softc *sc, struct vmbus_channel *chan)
 	rxr->hn_rx_flags &= ~HN_RX_FLAG_ATTACHED;
 
 	if (idx < sc->hn_tx_ring_inuse) {
-		txr = &sc->hn_tx_ring[idx];
+		struct hn_tx_ring *txr = &sc->hn_tx_ring[idx];
+
 		KASSERT((txr->hn_tx_flags & HN_TX_FLAG_ATTACHED),
 		    ("TX ring %d is not attached attached", idx));
 		txr->hn_tx_flags &= ~HN_TX_FLAG_ATTACHED;
@@ -4268,8 +4273,6 @@ hn_chan_detach(struct hn_softc *sc, struct vmbus_channel *chan)
 		    "bufring is connected after being closed\n",
 		    vmbus_chan_id(chan), vmbus_chan_subidx(chan));
 		rxr->hn_rx_flags |= HN_RX_FLAG_BR_REF;
-		if (txr != NULL)
-			txr->hn_tx_flags |= HN_TX_FLAG_BR_REF;
 	} else if (error) {
 		if_printf(sc->hn_ifp, "chan%u subidx%u close failed: %d\n",
 		    vmbus_chan_id(chan), vmbus_chan_subidx(chan), error);
@@ -4406,9 +4409,17 @@ hn_synth_alloc_subchans(struct hn_softc *sc, int *nsubch)
 static bool
 hn_synth_attachable(const struct hn_softc *sc)
 {
+	int i;
 
 	if (sc->hn_flags & HN_FLAG_ERRORS)
 		return (false);
+
+	for (i = 0; i < sc->hn_rx_ring_cnt; ++i) {
+		const struct hn_rx_ring *rxr = &sc->hn_rx_ring[i];
+
+		if (rxr->hn_rx_flags & HN_RX_FLAG_BR_REF)
+			return (false);
+	}
 	return (true);
 }
 

@@ -165,7 +165,6 @@ struct hn_tx_ring {
 
 #define HN_TX_FLAG_ATTACHED	0x0001
 #define HN_TX_FLAG_HASHVAL	0x0002	/* support HASHVAL pktinfo */
-#define HN_TX_FLAG_BR_REF	0x0004
 
 /*
  * Device-specific softc structure
