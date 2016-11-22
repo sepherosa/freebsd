@@ -3571,9 +3571,6 @@ hn_create_tx_data(struct hn_softc *sc, int ring_cnt)
 		return (ENOMEM);
 	}
 
-#if __FreeBSD_version >= 1100000
-	sc->hn_tx_ehash_key = m_ether_tcpip_hash_init();
-#endif
 	sc->hn_tx_ring_cnt = ring_cnt;
 	sc->hn_tx_ring_inuse = sc->hn_tx_ring_cnt;
 
@@ -4063,17 +4060,10 @@ hn_transmit(struct ifnet *ifp, struct mbuf *m)
 #endif
 
 	/*
-	 * Select the TX ring.
+	 * Select the TX ring based on flowid
 	 */
-	if (M_HASHTYPE_GET(m) != M_HASHTYPE_NONE) {
+	if (M_HASHTYPE_GET(m) != M_HASHTYPE_NONE)
 		idx = m->m_pkthdr.flowid % sc->hn_tx_ring_inuse;
-	}
-#if __FreeBSD_version >= 1100000
-	else {
-		idx = m_ether_tcpip_hash(MBUF_HASHFLAG_L3 | MBUF_HASHFLAG_L4,
-		    m, sc->hn_tx_ehash_key) % sc->hn_tx_ring_inuse;
-	}
-#endif
 	txr = &sc->hn_tx_ring[idx];
 
 	error = drbr_enqueue(ifp, txr->hn_mbuf_br, m);
