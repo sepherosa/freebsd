@@ -4215,8 +4215,14 @@ hn_chan_attach(struct hn_softc *sc, struct vmbus_channel *chan)
 	cbr.cbr_rxsz = HN_RXBR_SIZE;
 	error = vmbus_chan_open_br(chan, &cbr, NULL, 0, hn_chan_callback, rxr);
 	if (error) {
-		if_printf(sc->hn_ifp, "open chan%u failed: %d\n",
-		    vmbus_chan_id(chan), error);
+		if (error == EISCONN) {
+			if_printf(sc->hn_ifp, "bufring is connected after "
+			    "chan%u open failure\n", vmbus_chan_id(chan));
+			rxr->hn_rx_flags |= HN_RX_FLAG_BR_REF;
+		} else {
+			if_printf(sc->hn_ifp, "open chan%u failed: %d\n",
+			    vmbus_chan_id(chan), error);
+		}
 		rxr->hn_rx_flags &= ~HN_RX_FLAG_ATTACHED;
 		if (txr != NULL)
 			txr->hn_tx_flags &= ~HN_TX_FLAG_ATTACHED;
