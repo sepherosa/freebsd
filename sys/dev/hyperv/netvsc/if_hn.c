@@ -4223,9 +4223,6 @@ hn_chan_attach(struct hn_softc *sc, struct vmbus_channel *chan)
 			if_printf(sc->hn_ifp, "open chan%u failed: %d\n",
 			    vmbus_chan_id(chan), error);
 		}
-		rxr->hn_rx_flags &= ~HN_RX_FLAG_ATTACHED;
-		if (txr != NULL)
-			txr->hn_tx_flags &= ~HN_TX_FLAG_ATTACHED;
 	}
 	return (error);
 }
@@ -4282,15 +4279,18 @@ hn_attach_subchans(struct hn_softc *sc)
 	int subchan_cnt = sc->hn_rx_ring_inuse - 1;
 	int i, error = 0;
 
-	if (subchan_cnt == 0)
-		return (0);
+	KASSERT(subchan_cnt > 0, ("no sub-channels"));
 
 	/* Attach the sub-channels. */
 	subchans = vmbus_subchan_get(sc->hn_prichan, subchan_cnt);
 	for (i = 0; i < subchan_cnt; ++i) {
-		error = hn_chan_attach(sc, subchans[i]);
-		if (error)
-			break;
+		int error1;
+
+		error1 = hn_chan_attach(sc, subchans[i]);
+		if (error1) {
+			error = error1;
+			/* Move on; all channels will be detached later. */
+		}
 	}
 	vmbus_subchan_rel(subchans, subchan_cnt);
 
@@ -4444,8 +4444,10 @@ hn_synth_attach(struct hn_softc *sc, int mtu)
 	 * Attach the primary channel _before_ attaching NVS and RNDIS.
 	 */
 	error = hn_chan_attach(sc, sc->hn_prichan);
-	if (error)
+	if (error) {
+		hn_chan_detach(sc, sc->hn_prichan);
 		return (error);
+	}
 
 	/*
 	 * Attach NVS.
