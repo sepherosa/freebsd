@@ -4422,9 +4422,12 @@ hn_synth_attachable(const struct hn_softc *sc)
 static int
 hn_synth_attach(struct hn_softc *sc, int mtu)
 {
+#define ATTACHED_NVS		0x0002
+#define ATTACHED_RNDIS		0x0004
+
 	struct ndis_rssprm_toeplitz *rss = &sc->hn_rss;
 	int error, nsubch, nchan, i;
-	uint32_t old_caps;
+	uint32_t old_caps, attached = 0;
 
 	KASSERT((sc->hn_flags & HN_FLAG_SYNTH_ATTACHED) == 0,
 	    ("synthetic parts were attached"));
@@ -4444,28 +4447,24 @@ hn_synth_attach(struct hn_softc *sc, int mtu)
 	 * Attach the primary channel _before_ attaching NVS and RNDIS.
 	 */
 	error = hn_chan_attach(sc, sc->hn_prichan);
-	if (error) {
-		hn_chan_detach(sc, sc->hn_prichan);
-		return (error);
-	}
+	if (error)
+		goto failed;
 
 	/*
 	 * Attach NVS.
 	 */
 	error = hn_nvs_attach(sc, mtu);
-	if (error) {
-		/* TODO: partial detach1 */
-		return (error);
-	}
+	if (error)
+		goto failed;
+	attached |= ATTACHED_NVS;
 
 	/*
 	 * Attach RNDIS _after_ NVS is attached.
 	 */
 	error = hn_rndis_attach(sc, mtu);
-	if (error) {
-		/* TODO: partial detach2 */
-		return (error);
-	}
+	if (error)
+		goto failed;
+	attached |= ATTACHED_RNDIS;
 
 	/*
 	 * Make sure capabilities are not changed.
@@ -4473,10 +4472,8 @@ hn_synth_attach(struct hn_softc *sc, int mtu)
 	if (device_is_attached(sc->hn_dev) && old_caps != sc->hn_caps) {
 		if_printf(sc->hn_ifp, "caps mismatch old 0x%08x, new 0x%08x\n",
 		    old_caps, sc->hn_caps);
-		/* Restore old capabilities and abort. */
-		sc->hn_caps = old_caps;
-		/* TODO: partial detach */
-		return ENXIO;
+		error = ENXIO;
+		goto failed;
 	}
 
 	/*
@@ -4488,10 +4485,8 @@ hn_synth_attach(struct hn_softc *sc, int mtu)
 	 */
 	nsubch = sc->hn_rx_ring_cnt - 1;
 	error = hn_synth_alloc_subchans(sc, &nsubch);
-	if (error) {
-		/* TODO: partial detach */
-		return (error);
-	}
+	if (error)
+		goto failed;
 	/* NOTE: _Full_ synthetic parts detach is required now. */
 	sc->hn_flags |= HN_FLAG_SYNTH_ATTACHED;
 
@@ -4510,10 +4505,8 @@ hn_synth_attach(struct hn_softc *sc, int mtu)
 	 * Attach the sub-channels.
 	 */
 	error = hn_attach_subchans(sc);
-	if (error) {
-		/* TODO: full detach */
-		return (error);
-	}
+	if (error)
+		goto failed;
 
 	/*
 	 * Configure RSS key and indirect table _after_ all sub-channels
@@ -4551,17 +4544,31 @@ hn_synth_attach(struct hn_softc *sc, int mtu)
 	}
 
 	error = hn_rndis_conf_rss(sc, NDIS_RSS_FLAG_NONE);
-	if (error) {
-		/* TODO: full detach */
-		return (error);
-	}
+	if (error)
+		goto failed;
 back:
 	/*
 	 * Fixup transmission aggregation setup.
 	 */
 	hn_set_txagg(sc);
-
 	return (0);
+
+failed:
+	if (sc->hn_flags & HN_FLAG_SYNTH_ATTACHED) {
+		hn_synth_detach(sc);
+	} else {
+		if (attached & ATTACHED_RNDIS)
+			hn_rndis_detach(sc);
+		if (attached & ATTACHED_NVS)
+			hn_nvs_detach(sc);
+		hn_chan_detach(sc, sc->hn_prichan);
+		/* Restore old capabilities. */
+		sc->hn_caps = old_caps;
+	}
+	return (error);
+
+#undef ATTACHED_RNDIS
+#undef ATTACHED_NVS
 }
 
 /*
@@ -4572,7 +4579,6 @@ back:
 static void
 hn_synth_detach(struct hn_softc *sc)
 {
-	HN_LOCK_ASSERT(sc);
 
 	KASSERT(sc->hn_flags & HN_FLAG_SYNTH_ATTACHED,
 	    ("synthetic parts were not attached"));
