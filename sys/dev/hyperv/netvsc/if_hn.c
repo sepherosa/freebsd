@@ -4490,18 +4490,33 @@ hn_synth_attach(struct hn_softc *sc, int mtu)
 		/* TODO: partial detach */
 		return (error);
 	}
+	/* NOTE: _Full_ synthetic parts detach is required now. */
+	sc->hn_flags |= HN_FLAG_SYNTH_ATTACHED;
 
+	/*
+	 * Set the # of TX/RX rings that could be used according to
+	 * the # of channels that NVS offered.
+	 */
 	nchan = nsubch + 1;
+	hn_set_ring_inuse(sc, nchan);
 	if (nchan == 1) {
 		/* Only the primary channel can be used; done */
 		goto back;
 	}
 
 	/*
-	 * Configure RSS key and indirect table _after_ all sub-channels
-	 * are allocated.
+	 * Attach the sub-channels.
 	 */
+	error = hn_attach_subchans(sc);
+	if (error) {
+		/* TODO: full detach */
+		return (error);
+	}
 
+	/*
+	 * Configure RSS key and indirect table _after_ all sub-channels
+	 * are attached.
+	 */
 	if ((sc->hn_flags & HN_FLAG_HAS_RSSKEY) == 0) {
 		/*
 		 * RSS key is not set yet; set it to the default RSS key.
@@ -4535,34 +4550,15 @@ hn_synth_attach(struct hn_softc *sc, int mtu)
 
 	error = hn_rndis_conf_rss(sc, NDIS_RSS_FLAG_NONE);
 	if (error) {
-		/*
-		 * Failed to configure RSS key or indirect table; only
-		 * the primary channel can be used.
-		 */
-		nchan = 1;
-	}
-back:
-	/*
-	 * Set the # of TX/RX rings that could be used according to
-	 * the # of channels that NVS offered.
-	 */
-	hn_set_ring_inuse(sc, nchan);
-
-	/*
-	 * Attach the sub-channels, if any.
-	 */
-	error = hn_attach_subchans(sc);
-	if (error) {
-		/* TODO: partial detach */
+		/* TODO: full detach */
 		return (error);
 	}
-
+back:
 	/*
 	 * Fixup transmission aggregation setup.
 	 */
 	hn_set_txagg(sc);
 
-	sc->hn_flags |= HN_FLAG_SYNTH_ATTACHED;
 	return (0);
 }
 
