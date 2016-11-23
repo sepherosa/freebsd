@@ -4451,15 +4451,19 @@ hn_synth_attach(struct hn_softc *sc, int mtu)
 	 * Attach NVS.
 	 */
 	error = hn_nvs_attach(sc, mtu);
-	if (error)
+	if (error) {
+		/* TODO: partial detach1 */
 		return (error);
+	}
 
 	/*
 	 * Attach RNDIS _after_ NVS is attached.
 	 */
 	error = hn_rndis_attach(sc, mtu);
-	if (error)
+	if (error) {
+		/* TODO: partial detach2 */
 		return (error);
+	}
 
 	/*
 	 * Make sure capabilities are not changed.
@@ -4469,6 +4473,7 @@ hn_synth_attach(struct hn_softc *sc, int mtu)
 		    old_caps, sc->hn_caps);
 		/* Restore old capabilities and abort. */
 		sc->hn_caps = old_caps;
+		/* TODO: partial detach */
 		return ENXIO;
 	}
 
@@ -4481,8 +4486,10 @@ hn_synth_attach(struct hn_softc *sc, int mtu)
 	 */
 	nsubch = sc->hn_rx_ring_cnt - 1;
 	error = hn_synth_alloc_subchans(sc, &nsubch);
-	if (error)
+	if (error) {
+		/* TODO: partial detach */
 		return (error);
+	}
 
 	nchan = nsubch + 1;
 	if (nchan == 1) {
@@ -4545,8 +4552,10 @@ back:
 	 * Attach the sub-channels, if any.
 	 */
 	error = hn_attach_subchans(sc);
-	if (error)
+	if (error) {
+		/* TODO: partial detach */
 		return (error);
+	}
 
 	/*
 	 * Fixup transmission aggregation setup.
