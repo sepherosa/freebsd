@@ -31,6 +31,7 @@ __FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
 #include <sys/bus.h>
+#include <sys/callout.h>
 #include <sys/kernel.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>
@@ -68,6 +69,7 @@ static void			vmbus_chan_clear_chmap(struct vmbus_channel *);
 static void			vmbus_chan_detach(struct vmbus_channel *);
 static bool			vmbus_chan_wait_revoke(
 				    const struct vmbus_channel *, bool);
+static void			vmbus_chan_poll_timeout(void *);
 
 static void			vmbus_chan_ins_prilist(struct vmbus_softc *,
 				    struct vmbus_channel *);
@@ -84,6 +86,7 @@ static void			vmbus_chan_rem_sublist(struct vmbus_channel *,
 
 static void			vmbus_chan_task(void *, int);
 static void			vmbus_chan_task_nobatch(void *, int);
+static void			vmbus_chan_poll_task(void *, int);
 static void			vmbus_chan_clrchmap_task(void *, int);
 static void			vmbus_prichan_attach_task(void *, int);
 static void			vmbus_subchan_attach_task(void *, int);
@@ -1185,6 +1188,9 @@ vmbus_chan_task(void *xchan, int pending __unused)
 	vmbus_chan_callback_t cb = chan->ch_cb;
 	void *cbarg = chan->ch_cbarg;
 
+	KASSERT(chan->ch_poll_intvl == 0,
+	    ("chan%u: interrupted in polling mode", chan->ch_id));
+
 	/*
 	 * Optimize host to guest signaling by ensuring:
 	 * 1. While reading the channel, we disable interrupts from
@@ -1216,7 +1222,31 @@ vmbus_chan_task_nobatch(void *xchan, int pending __unused)
 {
 	struct vmbus_channel *chan = xchan;
 
+	KASSERT(chan->ch_poll_intvl == 0,
+	    ("chan%u: interrupted in polling mode", chan->ch_id));
 	chan->ch_cb(chan, chan->ch_cbarg);
+}
+
+static void
+vmbus_chan_poll_timeout(void *xchan)
+{
+	struct vmbus_channel *chan = xchan;
+
+	KASSERT(chan->ch_poll_intvl != 0,
+	    ("chan%u: polling timeout in interrupt mode", chan->ch_id));
+	taskqueue_enqueue(chan->ch_tq, &chan->ch_poll_task);
+}
+
+static void
+vmbus_chan_poll_task(void *xchan, int pending __unused)
+{
+	struct vmbus_channel *chan = xchan;
+
+	KASSERT(chan->ch_poll_intvl != 0,
+	    ("chan%u: polling in interrupt mode", chan->ch_id));
+	chan->ch_cb(chan, chan->ch_cbarg);
+	callout_reset_sbt_curcpu(&chan->ch_poll_timeo, chan->ch_poll_intvl, 0,
+	    vmbus_chan_poll_timeout, chan, 0);
 }
 
 static __inline void
@@ -1333,6 +1363,11 @@ vmbus_chan_alloc(struct vmbus_softc *sc)
 	vmbus_rxbr_init(&chan->ch_rxbr);
 	vmbus_txbr_init(&chan->ch_txbr);
 
+	TASK_INIT(&chan->ch_poll_task, 0, vmbus_chan_poll_task, chan);
+	/* Only for callout_drain. */
+	mtx_init(&chan->ch_poll_lock, "vmbus poll", NULL, MTX_DEF);
+	callout_init_mtx(&chan->ch_poll_timeo, &chan->ch_poll_lock, 0);
+
 	return chan;
 }
 
@@ -1351,8 +1386,10 @@ vmbus_chan_free(struct vmbus_channel *chan)
 	    ("still has orphan xact installed"));
 	KASSERT(chan->ch_refs == 0, ("chan%u: invalid refcnt %d",
 	    chan->ch_id, chan->ch_refs));
+	KASSERT(chan->ch_poll_intvl == 0, ("chan%u: polling is activated"));
 
 	hyperv_dmamem_free(&chan->ch_monprm_dma, chan->ch_monprm);
+	mtx_destroy(&chan->ch_poll_lock);
 	mtx_destroy(&chan->ch_subchan_lock);
 	sx_destroy(&chan->ch_orphan_lock);
 	vmbus_rxbr_deinit(&chan->ch_rxbr);

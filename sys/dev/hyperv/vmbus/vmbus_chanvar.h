@@ -30,6 +30,7 @@
 #define _VMBUS_CHANVAR_H_
 
 #include <sys/param.h>
+#include <sys/callout.h>
 #include <sys/lock.h>
 #include <sys/mutex.h>
 #include <sys/queue.h>
@@ -57,6 +58,10 @@ struct vmbus_channel {
 
 	struct taskqueue		*ch_tq;
 	struct task			ch_task;
+	struct task			ch_poll_task;
+	sbintime_t			ch_poll_intvl;
+	struct callout			ch_poll_timeo;
+	struct mtx			ch_poll_lock;
 	vmbus_chan_callback_t		ch_cb;
 	void				*ch_cbarg;
 
