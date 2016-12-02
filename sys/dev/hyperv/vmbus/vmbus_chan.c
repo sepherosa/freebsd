@@ -1326,20 +1326,26 @@ static bool
 vmbus_chan_poll_cancel_intq(struct vmbus_channel *chan)
 {
 
-	/*
-	 * Disable polling by resetting polling interval.
-	 */
 	if (chan->ch_poll_intvl == 0) {
 		/* Not enabled. */
 		return (false);
 	}
-	chan->ch_poll_intvl = 0;
 
 	/*
 	 * Stop polling callout, so that channel polling task
 	 * will not be enqueued anymore.
 	 */
 	callout_drain(&chan->ch_poll_timeo);
+
+	/*
+	 * Disable polling by resetting polling interval.
+	 *
+	 * NOTE:
+	 * The polling interval resetting MUST be conducted
+	 * after the callout is drained; mainly to keep the
+	 * proper assertion in place.
+	 */
+	chan->ch_poll_intvl = 0;
 
 	/*
 	 * NOTE:
