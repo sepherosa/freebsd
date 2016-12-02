@@ -51,6 +51,11 @@ __FBSDID("$FreeBSD$");
 #include <dev/hyperv/vmbus/vmbus_brvar.h>
 #include <dev/hyperv/vmbus/vmbus_chanvar.h>
 
+struct vmbus_chan_pollarg {
+	struct vmbus_channel	*poll_chan;
+	u_int			poll_hz;
+};
+
 static void			vmbus_chan_update_evtflagcnt(
 				    struct vmbus_softc *,
 				    const struct vmbus_channel *);
@@ -88,6 +93,7 @@ static void			vmbus_chan_task(void *, int);
 static void			vmbus_chan_task_nobatch(void *, int);
 static void			vmbus_chan_poll_task(void *, int);
 static void			vmbus_chan_clrchmap_task(void *, int);
+static void			vmbus_chan_pollcfg_task(void *, int);
 static void			vmbus_prichan_attach_task(void *, int);
 static void			vmbus_subchan_attach_task(void *, int);
 static void			vmbus_prichan_detach_task(void *, int);
@@ -1249,6 +1255,36 @@ vmbus_chan_poll_task(void *xchan, int pending __unused)
 	chan->ch_cb(chan, chan->ch_cbarg);
 }
 
+static void
+vmbus_chan_pollcfg_task(void *xarg, int pending __unused)
+{
+	const struct vmbus_chan_pollarg *arg = xarg;
+	struct vmbus_channel *chan = arg->poll_chan;
+
+	chan->ch_poll_intvl = SBT_1S / arg->poll_hz;
+	if (chan->ch_poll_intvl == 0)
+		chan->ch_poll_intvl = 1;
+
+	/*
+	 * Make sure that ISR can not enqueue this channel task
+	 * anymore.
+	 */
+	critical_enter();
+	vmbus_rxbr_intr_mask(&chan->ch_rxbr);
+	chan->ch_vmbus->vmbus_chmap[chan->ch_id] = NULL;
+	critical_exit();
+
+	/*
+	 * NOTE:
+	 * At this point, this channel task will not be enqueued by
+	 * the ISR anymore, time to cancel the pending one.
+	 */
+	taskqueue_cancel(chan->ch_tq, &chan->ch_task, NULL);
+
+	/* Kick start! */
+	taskqueue_enqueue(chan->ch_tq, &chan->ch_poll_task);
+}
+
 static __inline void
 vmbus_event_flags_proc(struct vmbus_softc *sc, volatile u_long *event_flags,
     int flag_cnt)
@@ -2035,4 +2071,22 @@ vmbus_chan_xact_wait(const struct vmbus_channel *chan,
 		}
 	}
 	return (ret);
+}
+
+void
+vmbus_chan_poll_enable(struct vmbus_channel *chan, u_int pollhz)
+{
+	struct vmbus_chan_pollarg arg;
+	struct task poll_cfg;
+
+	KASSERT(chan->ch_flags & VMBUS_CHAN_FLAG_BATCHREAD,
+	    ("polling on non-batch chan%u", chan->ch_id));
+	KASSERT(pollhz >= VMBUS_CHAN_POLLHZ_MIN &&
+	    pollhz <= VMBUS_CHAN_POLLHZ_MAX, ("invalid pollhz %u", pollhz));
+
+	arg.poll_chan = chan;
+	arg.poll_hz = pollhz;
+	TASK_INIT(&poll_cfg, 0, vmbus_chan_pollcfg_task, &arg);
+
+	vmbus_chan_run_task(chan, &poll_cfg);
 }
