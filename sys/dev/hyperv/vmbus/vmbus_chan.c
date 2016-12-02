@@ -1244,9 +1244,9 @@ vmbus_chan_poll_task(void *xchan, int pending __unused)
 
 	KASSERT(chan->ch_poll_intvl != 0,
 	    ("chan%u: polling in interrupt mode", chan->ch_id));
-	chan->ch_cb(chan, chan->ch_cbarg);
 	callout_reset_sbt_curcpu(&chan->ch_poll_timeo, chan->ch_poll_intvl, 0,
 	    vmbus_chan_poll_timeout, chan, 0);
+	chan->ch_cb(chan, chan->ch_cbarg);
 }
 
 static __inline void
