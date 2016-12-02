@@ -1386,7 +1386,8 @@ vmbus_chan_free(struct vmbus_channel *chan)
 	    ("still has orphan xact installed"));
 	KASSERT(chan->ch_refs == 0, ("chan%u: invalid refcnt %d",
 	    chan->ch_id, chan->ch_refs));
-	KASSERT(chan->ch_poll_intvl == 0, ("chan%u: polling is activated"));
+	KASSERT(chan->ch_poll_intvl == 0, ("chan%u: polling is activated",
+	    chan->ch_id));
 
 	hyperv_dmamem_free(&chan->ch_monprm_dma, chan->ch_monprm);
 	mtx_destroy(&chan->ch_poll_lock);
