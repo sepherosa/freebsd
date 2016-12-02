@@ -75,6 +75,9 @@ static void			vmbus_chan_detach(struct vmbus_channel *);
 static bool			vmbus_chan_wait_revoke(
 				    const struct vmbus_channel *, bool);
 static void			vmbus_chan_poll_timeout(void *);
+static bool			vmbus_chan_poll_cancel_intq(
+				    struct vmbus_channel *);
+static void			vmbus_chan_poll_cancel(struct vmbus_channel *);
 
 static void			vmbus_chan_ins_prilist(struct vmbus_softc *,
 				    struct vmbus_channel *);
@@ -95,6 +98,7 @@ static void			vmbus_chan_poll_task(void *, int);
 static void			vmbus_chan_clrchmap_task(void *, int);
 static void			vmbus_chan_pollcfg_task(void *, int);
 static void			vmbus_chan_polldis_task(void *, int);
+static void			vmbus_chan_poll_cancel_task(void *, int);
 static void			vmbus_prichan_attach_task(void *, int);
 static void			vmbus_subchan_attach_task(void *, int);
 static void			vmbus_prichan_detach_task(void *, int);
@@ -792,6 +796,22 @@ vmbus_chan_set_chmap(struct vmbus_channel *chan)
 	chan->ch_vmbus->vmbus_chmap[chan->ch_id] = chan;
 }
 
+static void
+vmbus_chan_poll_cancel_task(void *xchan, int pending __unused)
+{
+
+	vmbus_chan_poll_cancel_intq(xchan);
+}
+
+static void
+vmbus_chan_poll_cancel(struct vmbus_channel *chan)
+{
+	struct task poll_cancel;
+
+	TASK_INIT(&poll_cancel, 0, vmbus_chan_poll_cancel_task, chan);
+	vmbus_chan_run_task(chan, &poll_cancel);
+}
+
 static int
 vmbus_chan_close_internal(struct vmbus_channel *chan)
 {
@@ -826,6 +846,11 @@ vmbus_chan_close_internal(struct vmbus_channel *chan)
 	 * sysctl tree.
 	 */
 	sysctl_ctx_free(&chan->ch_sysctl_ctx);
+
+	/*
+	 * Cancel polling, if it is enabled.
+	 */
+	vmbus_chan_poll_cancel(chan);
 
 	/*
 	 * NOTE:
@@ -1298,7 +1323,7 @@ vmbus_chan_pollcfg_task(void *xarg, int pending __unused)
 }
 
 static bool
-vmbus_chan_poll_cancel(struct vmbus_channel *chan)
+vmbus_chan_poll_cancel_intq(struct vmbus_channel *chan)
 {
 
 	/*
@@ -1333,7 +1358,7 @@ vmbus_chan_polldis_task(void *xchan, int pending __unused)
 {
 	struct vmbus_channel *chan = xchan;
 
-	if (!vmbus_chan_poll_cancel(chan)) {
+	if (!vmbus_chan_poll_cancel_intq(chan)) {
 		/* Already disabled; done. */
 		return;
 	}
