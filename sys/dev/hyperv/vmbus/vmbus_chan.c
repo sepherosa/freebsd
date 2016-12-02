@@ -1297,19 +1297,23 @@ vmbus_chan_pollcfg_task(void *xarg, int pending __unused)
 	taskqueue_enqueue(chan->ch_tq, &chan->ch_poll_task);
 }
 
-static void
-vmbus_chan_polldis_task(void *xchan, int pending __unused)
+static bool
+vmbus_chan_poll_cancel(struct vmbus_channel *chan)
 {
-	struct vmbus_channel *chan = xchan;
 
-	/* Disable polling. */
+	/*
+	 * Disable polling by resetting polling interval.
+	 */
 	if (chan->ch_poll_intvl == 0) {
-		/* Not enabled; done */
-		return;
+		/* Not enabled. */
+		return (false);
 	}
 	chan->ch_poll_intvl = 0;
 
-	/* Stop polling timer. */
+	/*
+	 * Stop polling callout, so that channel polling task
+	 * will not be enqueued anymore.
+	 */
 	callout_drain(&chan->ch_poll_timeo);
 
 	/*
@@ -1319,6 +1323,20 @@ vmbus_chan_polldis_task(void *xchan, int pending __unused)
 	 * pending one.
 	 */
 	taskqueue_cancel(chan->ch_tq, &chan->ch_poll_task, NULL);
+
+	/* Polling was enabled. */
+	return (true);
+}
+
+static void
+vmbus_chan_polldis_task(void *xchan, int pending __unused)
+{
+	struct vmbus_channel *chan = xchan;
+
+	if (!vmbus_chan_poll_cancel(chan)) {
+		/* Already disabled; done. */
+		return;
+	}
 
 	/*
 	 * Plug this channel back to the channel map and unmask
