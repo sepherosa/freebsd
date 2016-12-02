@@ -225,5 +225,6 @@ struct taskqueue *
 
 void		vmbus_chan_poll_enable(struct vmbus_channel *chan,
 		    u_int pollhz);
+void		vmbus_chan_poll_disable(struct vmbus_channel *chan);
 
 #endif	/* !_VMBUS_H_ */

@@ -94,6 +94,7 @@ static void			vmbus_chan_task_nobatch(void *, int);
 static void			vmbus_chan_poll_task(void *, int);
 static void			vmbus_chan_clrchmap_task(void *, int);
 static void			vmbus_chan_pollcfg_task(void *, int);
+static void			vmbus_chan_polldis_task(void *, int);
 static void			vmbus_prichan_attach_task(void *, int);
 static void			vmbus_subchan_attach_task(void *, int);
 static void			vmbus_prichan_detach_task(void *, int);
@@ -1262,6 +1263,9 @@ vmbus_chan_pollcfg_task(void *xarg, int pending __unused)
 	struct vmbus_channel *chan = arg->poll_chan;
 	sbintime_t intvl;
 
+	/*
+	 * Save polling interval.
+	 */
 	intvl = SBT_1S / arg->poll_hz;
 	if (intvl == 0)
 		intvl = 1;
@@ -1272,8 +1276,10 @@ vmbus_chan_pollcfg_task(void *xarg, int pending __unused)
 	chan->ch_poll_intvl = intvl;
 
 	/*
-	 * Make sure that ISR can not enqueue this channel task
-	 * anymore.
+	 * Disable interrupt from the RX bufring (TX bufring does not
+	 * generate interrupt to VM), and disconnect this channel from
+	 * the channel map to make sure that ISR can not enqueue this
+	 * channel task anymore.
 	 */
 	critical_enter();
 	vmbus_rxbr_intr_mask(&chan->ch_rxbr);
@@ -1289,6 +1295,46 @@ vmbus_chan_pollcfg_task(void *xarg, int pending __unused)
 
 	/* Kick start! */
 	taskqueue_enqueue(chan->ch_tq, &chan->ch_poll_task);
+}
+
+static void
+vmbus_chan_polldis_task(void *xchan, int pending __unused)
+{
+	struct vmbus_channel *chan = xchan;
+
+	/* Disable polling. */
+	if (chan->ch_poll_intvl == 0) {
+		/* Not enabled; done */
+		return;
+	}
+	chan->ch_poll_intvl = 0;
+
+	/* Stop polling timer. */
+	callout_drain(&chan->ch_poll_timeo);
+
+	/*
+	 * NOTE:
+	 * At this point, this channel polling task will not be
+	 * enqueued by the callout anymore, time to cancel the
+	 * pending one.
+	 */
+	taskqueue_cancel(chan->ch_tq, &chan->ch_poll_task, NULL);
+
+	/*
+	 * Plug this channel back to the channel map and unmask
+	 * the RX bufring interrupt.
+	 */
+	critical_enter();
+	chan->ch_vmbus->vmbus_chmap[chan->ch_id] = chan;
+	__compiler_membar();
+	vmbus_rxbr_intr_unmask(&chan->ch_rxbr);
+	critical_exit();
+
+	/*
+	 * Kick start the interrupt task, just in case unmasking
+	 * interrupt races ISR.
+	 */
+	taskqueue_enqueue(chan->ch_tq, &chan->ch_task);
 }
 
 static __inline void
@@ -2086,13 +2132,24 @@ vmbus_chan_poll_enable(struct vmbus_channel *chan, u_int pollhz)
 	struct task poll_cfg;
 
 	KASSERT(chan->ch_flags & VMBUS_CHAN_FLAG_BATCHREAD,
-	    ("polling on non-batch chan%u", chan->ch_id));
+	    ("enable polling on non-batch chan%u", chan->ch_id));
 	KASSERT(pollhz >= VMBUS_CHAN_POLLHZ_MIN &&
 	    pollhz <= VMBUS_CHAN_POLLHZ_MAX, ("invalid pollhz %u", pollhz));
 
 	arg.poll_chan = chan;
 	arg.poll_hz = pollhz;
 	TASK_INIT(&poll_cfg, 0, vmbus_chan_pollcfg_task, &arg);
-
 	vmbus_chan_run_task(chan, &poll_cfg);
+}
+
+void
+vmbus_chan_poll_disable(struct vmbus_channel *chan)
+{
+	struct task poll_dis;
+
+	KASSERT(chan->ch_flags & VMBUS_CHAN_FLAG_BATCHREAD,
+	    ("disable polling on non-batch chan%u", chan->ch_id));
+
+	TASK_INIT(&poll_dis, 0, vmbus_chan_polldis_task, chan);
+	vmbus_chan_run_task(chan, &poll_dis);
 }
