@@ -1260,10 +1260,16 @@ vmbus_chan_pollcfg_task(void *xarg, int pending __unused)
 {
 	const struct vmbus_chan_pollarg *arg = xarg;
 	struct vmbus_channel *chan = arg->poll_chan;
+	sbintime_t intvl;
 
-	chan->ch_poll_intvl = SBT_1S / arg->poll_hz;
-	if (chan->ch_poll_intvl == 0)
-		chan->ch_poll_intvl = 1;
+	intvl = SBT_1S / arg->poll_hz;
+	if (intvl == 0)
+		intvl = 1;
+	if (intvl == chan->ch_poll_intvl) {
+		/* Nothing changes; done */
+		return;
+	}
+	chan->ch_poll_intvl = intvl;
 
 	/*
 	 * Make sure that ISR can not enqueue this channel task
