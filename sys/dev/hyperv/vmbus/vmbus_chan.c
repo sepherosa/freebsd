@@ -1501,9 +1501,7 @@ vmbus_chan_alloc(struct vmbus_softc *sc)
 	vmbus_txbr_init(&chan->ch_txbr);
 
 	TASK_INIT(&chan->ch_poll_task, 0, vmbus_chan_poll_task, chan);
-	/* Only for callout_drain. */
-	mtx_init(&chan->ch_poll_lock, "vmbus poll", NULL, MTX_SPIN);
-	callout_init_mtx(&chan->ch_poll_timeo, &chan->ch_poll_lock, 0);
+	callout_init(&chan->ch_poll_timeo, 1);
 
 	return chan;
 }
@@ -1527,7 +1525,6 @@ vmbus_chan_free(struct vmbus_channel *chan)
 	    chan->ch_id));
 
 	hyperv_dmamem_free(&chan->ch_monprm_dma, chan->ch_monprm);
-	mtx_destroy(&chan->ch_poll_lock);
 	mtx_destroy(&chan->ch_subchan_lock);
 	sx_destroy(&chan->ch_orphan_lock);
 	vmbus_rxbr_deinit(&chan->ch_rxbr);
