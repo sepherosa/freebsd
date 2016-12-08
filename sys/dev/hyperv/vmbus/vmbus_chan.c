@@ -1277,7 +1277,7 @@ vmbus_chan_poll_task(void *xchan, int pending __unused)
 	KASSERT(chan->ch_poll_intvl != 0,
 	    ("chan%u: polling in interrupt mode", chan->ch_id));
 	callout_reset_sbt_curcpu(&chan->ch_poll_timeo, chan->ch_poll_intvl, 0,
-	    vmbus_chan_poll_timeout, chan, 0);
+	    vmbus_chan_poll_timeout, chan, C_DIRECT_EXEC);
 	chan->ch_cb(chan, chan->ch_cbarg);
 }
 
@@ -1502,7 +1502,7 @@ vmbus_chan_alloc(struct vmbus_softc *sc)
 
 	TASK_INIT(&chan->ch_poll_task, 0, vmbus_chan_poll_task, chan);
 	/* Only for callout_drain. */
-	mtx_init(&chan->ch_poll_lock, "vmbus poll", NULL, MTX_DEF);
+	mtx_init(&chan->ch_poll_lock, "vmbus poll", NULL, MTX_SPIN);
 	callout_init_mtx(&chan->ch_poll_timeo, &chan->ch_poll_lock, 0);
 
 	return chan;
