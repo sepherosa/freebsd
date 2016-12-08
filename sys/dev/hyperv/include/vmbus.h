@@ -49,7 +49,7 @@
 #define VMBUS_VERSION_MAJOR(ver)	(((uint32_t)(ver)) >> 16)
 #define VMBUS_VERSION_MINOR(ver)	(((uint32_t)(ver)) & 0xffff)
 
-#define VMBUS_CHAN_POLLHZ_MIN		1000	/* 1ms interval */
+#define VMBUS_CHAN_POLLHZ_MIN		100	/* 10ms interval */
 #define VMBUS_CHAN_POLLHZ_MAX		1000000	/* 1us interval */
 
 /*

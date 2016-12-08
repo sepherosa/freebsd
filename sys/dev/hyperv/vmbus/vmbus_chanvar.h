@@ -50,6 +50,7 @@ struct vmbus_channel {
 	 * target CPU.
 	 */
 	uint32_t			ch_flags;	/* VMBUS_CHAN_FLAG_ */
+	int				ch_poll_flags;	/* callout flags */
 
 	/*
 	 * RX bufring; immediately following ch_txbr.
