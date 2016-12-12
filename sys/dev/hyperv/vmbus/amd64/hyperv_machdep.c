@@ -99,7 +99,7 @@ hyperv_tsc_timecount_##fence(struct timecounter *tc)			\
 		/* Sequence changed; re-sync. */			\
 	}								\
 	/* Fallback to the generic timecounter, i.e. rdmsr. */		\
-	return (hyperv_get_timecount(tc));				\
+	return (rdmsr(MSR_HV_TIME_REF_COUNT));				\
 }									\
 struct __hack
 
