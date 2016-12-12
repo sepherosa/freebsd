@@ -113,8 +113,8 @@ hyperv_tsc_tcinit(void *dummy __unused)
 
 	if ((hyperv_features &
 	     (CPUID_HV_MSR_TIME_REFCNT | CPUID_HV_MSR_REFERENCE_TSC)) !=
-	    (CPUID_HV_MSR_TIME_REFCNT | CPUID_HV_MSR_REFERENCE_TSC) &&
-	    (cpu_feature & CPUID_SSE2))	/* for mfence/lfence */
+	    (CPUID_HV_MSR_TIME_REFCNT | CPUID_HV_MSR_REFERENCE_TSC) ||
+	    (cpu_feature & CPUID_SSE2) == 0)	/* SSE2 for mfence/lfence */
 		return;
 
 	switch (cpu_vendor_id) {
