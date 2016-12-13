@@ -31,10 +31,10 @@
 #ifndef _HYPERV_H_
 #define _HYPERV_H_
 
+#ifdef _KERNEL
+
 #include <sys/param.h>
 #include <sys/systm.h>
-
-#ifdef _KERNEL
 
 #define MSR_HV_TIME_REF_COUNT		0x40000020
 
@@ -67,7 +67,9 @@ struct hyperv_reftsc {
 	volatile uint64_t		tsc_scale;
 	volatile int64_t		tsc_ofs;
 } __packed __aligned(PAGE_SIZE);
+#ifdef CTASSERT
 CTASSERT(sizeof(struct hyperv_reftsc) == PAGE_SIZE);
+#endif
 
 #ifdef _KERNEL
 
