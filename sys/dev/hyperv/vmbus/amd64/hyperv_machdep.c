@@ -79,7 +79,7 @@ hyperv_tsc_timecount_##fence(struct timecounter *tc)			\
 	struct hyperv_reftsc *tsc_ref = hyperv_ref_tsc.tsc_ref;		\
 	uint32_t seq;							\
 									\
-	while ((seq = tsc_ref->tsc_seq) != 0) {				\
+	while ((seq = atomic_load_acq_int(&tsc_ref->tsc_seq)) != 0) {	\
 		uint64_t disc, ret, tsc;				\
 		uint64_t scale = tsc_ref->tsc_scale;			\
 		int64_t ofs = tsc_ref->tsc_ofs;				\
@@ -93,6 +93,7 @@ hyperv_tsc_timecount_##fence(struct timecounter *tc)			\
 		    "a" (tsc), "r" (scale));				\
 		ret += ofs;						\
 									\
+		atomic_thread_fence_acq();				\
 		if (tsc_ref->tsc_seq == seq)				\
 			return (ret);					\
 									\
