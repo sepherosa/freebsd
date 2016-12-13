@@ -36,6 +36,9 @@ __FBSDID("$FreeBSD$");
 #include <machine/cpufunc.h>
 #include <machine/cputypes.h>
 #include <machine/md_var.h>
+#include <machine/specialreg.h>
+
+#include <vm/vm.h>
 
 #include <dev/hyperv/include/hyperv.h>
 #include <dev/hyperv/include/hyperv_busdma.h>
@@ -64,7 +67,7 @@ static struct timecounter	hyperv_tsc_timecounter = {
 static struct cdevsw		hyperv_tsc_cdevsw = {
 	.d_version		= D_VERSION,
 	.d_mmap			= hyperv_tsc_mmap,
-	.d_name			= "hv_tsc",
+	.d_name			= HYPERV_REFTSC_DEVNAME
 };
 
 static struct hyperv_reftsc_ctx	hyperv_ref_tsc;
@@ -177,7 +180,8 @@ hyperv_tsc_tcinit(void *dummy __unused)
 	tc_init(&hyperv_tsc_timecounter);
 
 	/* Add device for mmap(2). */
-	make_dev(&hyperv_tsc_cdevsw, 0, UID_ROOT, GID_WHEEL, 0444, "hv_tsc");
+	make_dev(&hyperv_tsc_cdevsw, 0, UID_ROOT, GID_WHEEL, 0444,
+	    HYPERV_REFTSC_DEVNAME);
 }
 SYSINIT(hyperv_tsc_init, SI_SUB_DRIVERS, SI_ORDER_FIRST, hyperv_tsc_tcinit,
     NULL);
