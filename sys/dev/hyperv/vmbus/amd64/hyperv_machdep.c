@@ -29,6 +29,7 @@ __FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
 #include <sys/conf.h>
+#include <sys/fcntl.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
 #include <sys/timetc.h>
@@ -51,6 +52,7 @@ struct hyperv_reftsc_ctx {
 	struct hyperv_dma	tsc_ref_dma;
 };
 
+static d_open_t			hyperv_tsc_open;
 static d_mmap_t			hyperv_tsc_mmap;
 
 static struct timecounter	hyperv_tsc_timecounter = {
@@ -66,6 +68,7 @@ static struct timecounter	hyperv_tsc_timecounter = {
 
 static struct cdevsw		hyperv_tsc_cdevsw = {
 	.d_version		= D_VERSION,
+	.d_open			= hyperv_tsc_open,
 	.d_mmap			= hyperv_tsc_mmap,
 	.d_name			= HYPERV_REFTSC_DEVNAME
 };
@@ -85,14 +88,28 @@ hypercall_md(volatile void *hc_addr, uint64_t in_val,
 }
 
 static int
+hyperv_tsc_open(struct cdev *dev __unused, int oflags, int devtype __unused,
+    struct thread *td __unused)
+{
+
+	if (oflags & FWRITE)
+		return (EPERM);
+	return (0);
+}
+
+static int
 hyperv_tsc_mmap(struct cdev *dev __unused, vm_ooffset_t offset,
-    vm_paddr_t *paddr, int nprot, vm_memattr_t *memattr __unused)
+    vm_paddr_t *paddr, int nprot __unused, vm_memattr_t *memattr __unused)
 {
 
 	KASSERT(hyperv_ref_tsc.tsc_ref != NULL, ("reftsc has not been setup"));
 
-	if (nprot != VM_PROT_READ)
-		return (EPERM);
+	/*
+	 * NOTE:
+	 * 'nprot' does not contain information interested to us;
+	 * WR-open is blocked by d_open.
+	 */
+
 	if (offset != 0)
 		return (EOPNOTSUPP);
 
