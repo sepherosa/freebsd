@@ -45,6 +45,10 @@ __FBSDID("$FreeBSD$");
 #include <machine/cpufunc.h>
 #include <machine/specialreg.h>
 #include <dev/acpica/acpi_hpet.h>
+#ifdef __amd64__
+#include <machine/atomic.h>
+#include <dev/hyperv/hyperv.h>
+#endif
 #include "libc_private.h"
 
 static void
@@ -144,6 +148,58 @@ __vdso_init_hpet(uint32_t u)
 	_close(fd);
 }
 
+#ifdef __amd64__
+
+#define HYPERV_REFTSC_DEVPATH	"/dev/" HYPERV_REFTSC_DEVNAME
+
+static struct hyperv_reftsc *hyperv_ref_tsc = MAP_FAILED;
+
+static void
+__vdso_init_hyperv_tsc(void)
+{
+	int fd;
+
+	fd = _open(HYPERV_REFTSC_DEVPATH, O_RDONLY);
+	if (fd < 0)
+		return;
+	hyperv_ref_tsc = mmap(NULL, sizeof(*hyperv_ref_tsc), PROT_READ,
+	    MAP_SHARED, fd, 0);
+	_close(fd);
+}
+
+static int
+__vdso_hyperv_tsc(struct hyperv_reftsc *tsc_ref, u_int *tc)
+{
+	uint32_t seq;
+
+	while ((seq = atomic_load_acq_int(&tsc_ref->tsc_seq)) != 0) {
+		uint64_t disc, ret, tsc;
+		uint64_t scale = tsc_ref->tsc_scale;
+		int64_t ofs = tsc_ref->tsc_ofs;
+
+		/* XXX mfence for AMD cpus. */
+		lfence_mb();
+		tsc = rdtsc();
+
+		/* ret = ((tsc * scale) >> 64) + ofs */
+		__asm__ __volatile__ ("mulq %3" :
+		    "=d" (ret), "=a" (disc) :
+		    "a" (tsc), "r" (scale));
+		ret += ofs;
+
+		atomic_thread_fence_acq();
+		if (tsc_ref->tsc_seq == seq) {
+			*tc = ret;
+			return (0);
+		}
+
+		/* Sequence changed; re-sync. */
+	}
+	return (ENOSYS);
+}
+
+#endif	/* __amd64__ */
+
 #pragma weak __vdso_gettc
 int
 __vdso_gettc(const struct vdso_timehands *th, u_int *tc)
@@ -165,6 +221,15 @@ __vdso_gettc(const struct vdso_timehands *th, u_int *tc)
 			return (ENOSYS);
 		*tc = *(volatile uint32_t *)(hpet_dev_map + HPET_MAIN_COUNTER);
 		return (0);
+#ifdef __amd64__
+	case VDSO_TH_ALGO_X86_HVTSC:
+		if (hyperv_ref_tsc == MAP_FAILED) {
+			__vdso_init_hyperv_tsc();
+			if (hyperv_ref_tsc == MAP_FAILED)
+				return (ENOSYS);
+		}
+		return (__vdso_hyperv_tsc(hyperv_ref_tsc, tc));
+#endif
 	default:
 		return (ENOSYS);
 	}
