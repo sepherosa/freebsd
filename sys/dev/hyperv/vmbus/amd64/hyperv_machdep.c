@@ -56,11 +56,6 @@ struct hyperv_reftsc_ctx {
 static uint32_t			hyperv_tsc_vdso_timehands(
 				    struct vdso_timehands *,
 				    struct timecounter *);
-#ifdef COMPAT_FREEBSD32
-static uint32_t			hyperv_tsc_vdso_timehands32(
-				    struct vdso_timehands32 *,
-				    struct timecounter *);
-#endif
 
 static d_open_t			hyperv_tsc_open;
 static d_mmap_t			hyperv_tsc_mmap;
@@ -72,9 +67,6 @@ static struct timecounter	hyperv_tsc_timecounter = {
 	.tc_name		= "Hyper-V-TSC",
 	.tc_quality		= 3000,
 	.tc_fill_vdso_timehands = hyperv_tsc_vdso_timehands,
-#ifdef COMPAT_FREEBSD32
-	.tc_fill_vdso_timehands32 = hyperv_tsc_vdso_timehands32
-#endif
 };
 
 static struct cdevsw		hyperv_tsc_cdevsw = {
@@ -134,21 +126,11 @@ hyperv_tsc_vdso_timehands(struct vdso_timehands *vdso_th,
 {
 
 	vdso_th->th_algo = VDSO_TH_ALGO_X86_HVTSC;
+	vdso_th->th_x86_shift = 0;
+	vdso_th->th_x86_hpet_idx = 0;
 	bzero(vdso_th->th_res, sizeof(vdso_th->th_res));
 	return (1);
 }
-
-#ifdef COMPAT_FREEBSD32
-static uint32_t
-hyperv_tsc_vdso_timehands32(struct vdso_timehands32 *vdso_th32,
-    struct timecounter *tc __unused)
-{
-
-	vdso_th32->th_algo = VDSO_TH_ALGO_X86_HVTSC;
-	bzero(vdso_th32->th_res, sizeof(vdso_th32->th_res));
-	return (1);
-}
-#endif	/* COMPAT_FREEBSD32 */
 
 #define HYPERV_TSC_TIMECOUNT(fence)					\
 static u_int								\
