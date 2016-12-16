@@ -156,7 +156,7 @@ __vdso_init_hpet(uint32_t u)
  * NOTE:
  * We use 'NULL' for this variable to indicate that initialization
  * is required.  And if this variable is 'MAP_FAILED', then Hyper-V
- * reference TSC can not be used, e.g. in jail.
+ * reference TSC can not be used, e.g. in misconfigured jail.
  */
 static struct hyperv_reftsc *hyperv_ref_tsc;
 
@@ -179,12 +179,13 @@ __vdso_init_hyperv_tsc(void)
 static int
 __vdso_hyperv_tsc(struct hyperv_reftsc *tsc_ref, u_int *tc)
 {
-	uint64_t disc, ret, tsc;
+	uint64_t disc, ret, tsc, scale;
 	uint32_t seq;
+	int64_t ofs;
 
 	while ((seq = atomic_load_acq_int(&tsc_ref->tsc_seq)) != 0) {
-		uint64_t scale = tsc_ref->tsc_scale;
-		int64_t ofs = tsc_ref->tsc_ofs;
+		scale = tsc_ref->tsc_scale;
+		ofs = tsc_ref->tsc_ofs;
 
 		lfence_mb();
 		tsc = rdtsc();
