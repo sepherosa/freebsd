@@ -147,6 +147,10 @@ static u_int hv_storvsc_max_io = 512;
 SYSCTL_UINT(_hw_storvsc, OID_AUTO, max_io, CTLFLAG_RDTUN,
 	&hv_storvsc_max_io, 0, "Hyper-V storage max io limit");
 
+static int hv_storvsc_chan_cnt = 0;
+SYSCTL_UINT(_hw_storvsc, OID_AUTO, chan_cnt, CTLFLAG_RDTUN,
+	&hv_storvsc_chan_cnt, 0, "# of channels to use");
+
 #define STORVSC_MAX_IO						\
 	vmbus_chan_prplist_nelem(hv_storvsc_ringbuffer_size,	\
 	   STORVSC_DATA_SEGCNT_MAX, VSTOR_PKT_SIZE)
@@ -550,13 +554,20 @@ hv_storvsc_channel_init(struct storvsc_softc *sc)
 		goto cleanup;
 	}
 
-	/* multi-channels feature is supported by WIN8 and above version */
 	max_chans = vstor_packet->u.chan_props.max_channel_cnt;
+	if (hv_storvsc_chan_cnt > 0 && hv_storvsc_chan_cnt < max_chans)
+		max_chans = hv_storvsc_chan_cnt;
+
+	/* multi-channels feature is supported by WIN8 and above version */
 	version = VMBUS_GET_VERSION(device_get_parent(sc->hs_dev), sc->hs_dev);
 	if (version != VMBUS_VERSION_WIN7 && version != VMBUS_VERSION_WS2008 &&
 	    (vstor_packet->u.chan_props.flags &
 	     HV_STORAGE_SUPPORTS_MULTI_CHANNEL)) {
 		support_multichannel = TRUE;
+	}
+	if (bootverbose) {
+		device_printf(sc->hs_dev, "max chans %d%s\n", max_chans,
+		    support_multichannel ? ", multi-chan capable" : "");
 	}
 
 	memset(vstor_packet, 0, sizeof(struct vstor_packet));
@@ -581,7 +592,7 @@ hv_storvsc_channel_init(struct storvsc_softc *sc)
 	 * If multi-channel is supported, send multichannel create
 	 * request to host.
 	 */
-	if (support_multichannel)
+	if (support_multichannel && max_chans > 1)
 		storvsc_send_multichannel_request(sc, max_chans);
 cleanup:
 	sema_destroy(&request->synch_sema);
