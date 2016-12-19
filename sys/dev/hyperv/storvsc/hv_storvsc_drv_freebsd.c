@@ -148,7 +148,7 @@ SYSCTL_UINT(_hw_storvsc, OID_AUTO, max_io, CTLFLAG_RDTUN,
 	&hv_storvsc_max_io, 0, "Hyper-V storage max io limit");
 
 static int hv_storvsc_chan_cnt = 0;
-SYSCTL_UINT(_hw_storvsc, OID_AUTO, chan_cnt, CTLFLAG_RDTUN,
+SYSCTL_INT(_hw_storvsc, OID_AUTO, chan_cnt, CTLFLAG_RDTUN,
 	&hv_storvsc_chan_cnt, 0, "# of channels to use");
 
 #define STORVSC_MAX_IO						\
