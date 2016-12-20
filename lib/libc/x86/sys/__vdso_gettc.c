@@ -45,10 +45,8 @@ __FBSDID("$FreeBSD$");
 #include <machine/cpufunc.h>
 #include <machine/specialreg.h>
 #include <dev/acpica/acpi_hpet.h>
-#ifdef __amd64__
 #include <machine/atomic.h>
 #include <dev/hyperv/hyperv.h>
-#endif
 #include "libc_private.h"
 
 static void
@@ -148,8 +146,6 @@ __vdso_init_hpet(uint32_t u)
 	_close(fd);
 }
 
-#ifdef __amd64__
-
 #define HYPERV_REFTSC_DEVPATH	"/dev/" HYPERV_REFTSC_DEVNAME
 
 /*
@@ -176,10 +172,61 @@ __vdso_init_hyperv_tsc(void)
 	_close(fd);
 }
 
+#if defined(__amd64__)
+static __inline uint64_t
+__vdso_hyperv_mulqhi(uint64_t tsc, uint64_t scale)
+{
+	uint64_t disc, ret;
+
+	__asm__ __volatile__ ("mulq %3" : "=d" (ret), "=a" (disc) :
+	    "a" (tsc), "r" (scale));
+	return (ret);
+}
+#elif defined(__i386__)
+/*
+ * Copied from compiler-rt multi3.c
+ */
+typedef long long		di_int;
+typedef unsigned long long	du_int;
+typedef int			ti_int __attribute__((mode (TI)));
+
+typedef union {
+	ti_int all;
+	struct {
+		du_int low;
+		di_int high;
+	} s;
+} twords;
+
+static __inline uint64_t
+__vdso_hyperv_mulqhi(du_int a, du_int b)
+{
+	twords r;
+	const int bits_in_dword_2 = (int)(sizeof(di_int) * CHAR_BIT) / 2;
+	const du_int lower_mask = (du_int)~0 >> bits_in_dword_2;
+
+	r.s.low = (a & lower_mask) * (b & lower_mask);
+	du_int t = r.s.low >> bits_in_dword_2;
+	r.s.low &= lower_mask;
+	t += (a >> bits_in_dword_2) * (b & lower_mask);
+	r.s.low += (t & lower_mask) << bits_in_dword_2;
+	r.s.high = t >> bits_in_dword_2;
+	t = r.s.low >> bits_in_dword_2;
+	r.s.low &= lower_mask;
+	t += (b >> bits_in_dword_2) * (a & lower_mask);
+	r.s.low += (t & lower_mask) << bits_in_dword_2;
+	r.s.high += t >> bits_in_dword_2;
+	r.s.high += (a >> bits_in_dword_2) * (b >> bits_in_dword_2);
+	return (r.s.high);
+}
+#else
+#error "unknown arch"
+#endif
+
 static int
 __vdso_hyperv_tsc(struct hyperv_reftsc *tsc_ref, u_int *tc)
 {
-	uint64_t disc, ret, tsc, scale;
+	uint64_t ret, tsc, scale;
 	uint32_t seq;
 	int64_t ofs;
 
@@ -191,9 +238,7 @@ __vdso_hyperv_tsc(struct hyperv_reftsc *tsc_ref, u_int *tc)
 		tsc = rdtsc();
 
 		/* ret = ((tsc * scale) >> 64) + ofs */
-		__asm__ __volatile__ ("mulq %3" :
-		    "=d" (ret), "=a" (disc) :
-		    "a" (tsc), "r" (scale));
+		ret = __vdso_hyperv_mulqhi(tsc, scale);
 		ret += ofs;
 
 		atomic_thread_fence_acq();
@@ -206,8 +251,6 @@ __vdso_hyperv_tsc(struct hyperv_reftsc *tsc_ref, u_int *tc)
 	}
 	return (ENOSYS);
 }
-
-#endif	/* __amd64__ */
 
 #pragma weak __vdso_gettc
 int
@@ -230,14 +273,12 @@ __vdso_gettc(const struct vdso_timehands *th, u_int *tc)
 			return (ENOSYS);
 		*tc = *(volatile uint32_t *)(hpet_dev_map + HPET_MAIN_COUNTER);
 		return (0);
-#ifdef __amd64__
 	case VDSO_TH_ALGO_X86_HVTSC:
 		if (hyperv_ref_tsc == NULL)
 			__vdso_init_hyperv_tsc();
 		if (hyperv_ref_tsc == MAP_FAILED)
 			return (ENOSYS);
 		return (__vdso_hyperv_tsc(hyperv_ref_tsc, tc));
-#endif
 	default:
 		return (ENOSYS);
 	}
