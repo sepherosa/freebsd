@@ -228,7 +228,7 @@ in_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp,
 	struct sockaddr_in *addr = (struct sockaddr_in *)&ifr->ifr_addr;
 	struct ifaddr *ifa;
 	struct in_ifaddr *ia;
-	int error;
+	int error, was_up = 0;
 
 	if (ifp == NULL)
 		return (EADDRNOTAVAIL);
@@ -250,9 +250,13 @@ in_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp,
 		return (error);
 	case OSIOCAIFADDR:	/* 9.x compat */
 	case SIOCAIFADDR:
+		if (ifp->if_flags & IFF_UP)
+			was_up = 1;
 		sx_xlock(&in_control_sx);
 		error = in_aifaddr_ioctl(cmd, data, ifp, td);
 		sx_xunlock(&in_control_sx);
+		if (!was_up && (ifp->if_flags & IFF_UP))
+			if_up(ifp);
 		return (error);
 	case SIOCSIFADDR:
 	case SIOCSIFBRDADDR:
