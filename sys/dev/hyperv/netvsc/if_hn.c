@@ -122,16 +122,12 @@ __FBSDID("$FreeBSD$");
 /* YYY should get it from the underlying channel */
 #define HN_TX_DESC_CNT			512
 
-#define HN_RNDIS_CHIMDATA_ALIGN		CACHE_LINE_SIZE
-#define HN_RNDIS_CHIMDATA_MASK		(HN_RNDIS_CHIMDATA_ALIGN - 1)
-
 #define HN_RNDIS_PKT_LEN					\
 	(sizeof(struct rndis_packet_msg) +			\
 	 HN_RNDIS_PKTINFO_SIZE(HN_NDIS_HASH_VALUE_SIZE) +	\
 	 HN_RNDIS_PKTINFO_SIZE(NDIS_VLAN_INFO_SIZE) +		\
 	 HN_RNDIS_PKTINFO_SIZE(NDIS_LSO2_INFO_SIZE) +		\
-	 HN_RNDIS_PKTINFO_SIZE(NDIS_TXCSUM_INFO_SIZE) +		\
-	 HN_RNDIS_CHIMDATA_ALIGN)
+	 HN_RNDIS_PKTINFO_SIZE(NDIS_TXCSUM_INFO_SIZE))
 #define HN_RNDIS_PKT_BOUNDARY		PAGE_SIZE
 #define HN_RNDIS_PKT_ALIGN		CACHE_LINE_SIZE
 
@@ -2000,26 +1996,6 @@ hn_encap(struct ifnet *ifp, struct hn_tx_ring *txr, struct hn_txdesc *txd,
 	}
 
 	pkt_hlen = pkt->rm_pktinfooffset + pkt->rm_pktinfolen;
-	if (chim != NULL) {
-		uintptr_t chim1 = (uintptr_t)chim, chim_aligned;
-#ifdef INVARIANTS
-		int old_pkt_hlen = pkt_hlen;
-#endif
-
-		/*
-		 * Align the data for chimney sending.
-		 */
-		chim_aligned = roundup2(chim1 + pkt_hlen,
-		    HN_RNDIS_CHIMDATA_ALIGN);
-		pkt_hlen = chim_aligned - chim1;
-		KASSERT(pkt_hlen >= old_pkt_hlen,
-		    ("invalid chimney data alignment, "
-		     "chim %p, new hlen %d, old hlen %d",
-		     chim, pkt_hlen, old_pkt_hlen));
-		KASSERT(pkt_hlen <= HN_RNDIS_PKT_LEN,
-		    ("chimney data alignment overflow, hlen %d, max %ju",
-		     pkt_hlen, (uintmax_t)HN_RNDIS_PKT_LEN));
-	}
 	/* Fixup RNDIS packet message total length */
 	pkt->rm_len += pkt_hlen;
 	/* Convert RNDIS packet message offsets */
@@ -2045,10 +2021,6 @@ hn_encap(struct ifnet *ifp, struct hn_tx_ring *txr, struct hn_txdesc *txd,
 		    ("chimney sending buffer is not used"));
 		tgt_txd->chim_size += pkt->rm_len;
 
-		KASSERT((((uintptr_t)chim + pkt_hlen) &
-		    HN_RNDIS_CHIMDATA_MASK) == 0,
-		    ("chimney data is not aligned %p",
-		     (uint8_t *)chim + pkt_hlen));
 		m_copydata(m_head, 0, m_head->m_pkthdr.len,
 		    ((uint8_t *)chim) + pkt_hlen);
 
