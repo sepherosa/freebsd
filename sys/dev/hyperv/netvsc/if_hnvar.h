@@ -49,9 +49,6 @@
 
 #define HN_GPACNT_MAX			32
 
-#define HN_TX_DESC_CNT			512
-#define HN_CHIM_BMAP_MAX		(HN_TX_DESC_CNT / LONG_BIT)
-
 struct hn_txdesc;
 #ifndef HN_USE_TXDESC_BUFRING
 SLIST_HEAD(hn_txdesc_list, hn_txdesc);
@@ -122,7 +119,6 @@ struct hn_tx_ring {
 	int		hn_oactive;
 	int		hn_tx_idx;
 	int		hn_tx_flags;
-	uint32_t	hn_chim_offset;
 
 	struct mtx	hn_tx_lock;
 	struct hn_softc	*hn_sc;
@@ -149,10 +145,6 @@ struct hn_tx_ring {
 	short		hn_stat_pkts;
 	short		hn_stat_mcasts;
 
-	uint8_t		hn_chim_bmapmax;
-	uint8_t		hn_chim_bmapidx;
-	u_long		hn_chim_avail_bmap[HN_CHIM_BMAP_MAX];
-
 	int		(*hn_sendpkt)(struct hn_tx_ring *, struct hn_txdesc *);
 	int		hn_suspended;
 	int		hn_gpa_cnt;
@@ -167,9 +159,6 @@ struct hn_tx_ring {
 	u_long		hn_pkts;
 	u_long		hn_sends;
 	u_long		hn_flush_failed;
-
-	u_long		hn_chim_free_bmap[HN_CHIM_BMAP_MAX]
-			    __aligned(CACHE_LINE_SIZE);
 
 	/* Rarely used stuffs */
 	struct hn_txdesc *hn_txdesc;
@@ -200,6 +189,8 @@ struct hn_softc {
 	struct hn_tx_ring *hn_tx_ring;
 
 	uint8_t		*hn_chim;
+	u_long		*hn_chim_bmap;
+	int		hn_chim_bmap_cnt;
 	int		hn_chim_cnt;
 	int		hn_chim_szmax;
 

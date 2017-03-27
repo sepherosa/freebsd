@@ -119,6 +119,9 @@ __FBSDID("$FreeBSD$");
 
 #define HN_RING_CNT_DEF_MAX		8
 
+/* YYY should get it from the underlying channel */
+#define HN_TX_DESC_CNT			512
+
 #define HN_RNDIS_PKT_LEN					\
 	(sizeof(struct rndis_packet_msg) +			\
 	 HN_RNDIS_PKTINFO_SIZE(HN_NDIS_HASH_VALUE_SIZE) +	\
@@ -360,8 +363,6 @@ static int			hn_encap(struct ifnet *, struct hn_tx_ring *,
 static int			hn_txpkt(struct ifnet *, struct hn_tx_ring *,
 				    struct hn_txdesc *);
 static void			hn_set_chim_size(struct hn_softc *, int);
-static void			hn_init_chim_bmap(struct hn_softc *);
-static void			hn_reset_chim_bmap(struct hn_softc *);
 static void			hn_set_tso_maxsize(struct hn_softc *, int, int);
 static bool			hn_tx_ring_pending(struct hn_tx_ring *);
 static void			hn_tx_ring_qflush(struct hn_tx_ring *);
@@ -571,7 +572,6 @@ hn_txpkt_chim(struct hn_tx_ring *txr, struct hn_txdesc *txd)
 	    &rndis, sizeof(rndis), &txd->send_ctx));
 }
 
-#if 0
 static __inline uint32_t
 hn_chim_alloc(struct hn_softc *sc)
 {
@@ -617,83 +617,6 @@ hn_chim_free(struct hn_softc *sc, uint32_t chim_idx)
 
 	atomic_clear_long(&sc->hn_chim_bmap[idx], mask);
 }
-#else
-static __inline uint32_t
-hn_chim_alloc(struct hn_tx_ring *txr)
-{
-	uint8_t tries;
-	u_long mask;
-	int ofs;
-
-again:
-	KASSERT(txr->hn_chim_bmapidx < txr->hn_chim_bmapmax,
-	    ("invalid chim bmap idx %u, chim bmap max %u",
-	     txr->hn_chim_bmapidx, txr->hn_chim_bmapmax));
-	ofs = ffsl(txr->hn_chim_avail_bmap[txr->hn_chim_bmapidx]);
-	if (ofs != 0) {
-		uint32_t chim_idx;
-
-		--ofs;	/* ffsl is 1-based */
-		txr->hn_chim_avail_bmap[txr->hn_chim_bmapidx] &= ~(1UL << ofs);
-
-		chim_idx = txr->hn_chim_offset + ofs +
-		    ((uint32_t)txr->hn_chim_bmapidx * LONG_BIT);
-		KASSERT(chim_idx < txr->hn_sc->hn_chim_cnt,
-		    ("invalid chim index %u, chim count %d",
-		     chim_idx, txr->hn_sc->hn_chim_cnt));
-
-		if (txr->hn_chim_avail_bmap[txr->hn_chim_bmapidx] == 0) {
-			txr->hn_chim_bmapidx =
-			    (txr->hn_chim_bmapidx + 1) % txr->hn_chim_bmapmax;
-		}
-		return (chim_idx);
-	}
-
-	tries = 0;
-retry:
-	KASSERT(txr->hn_chim_bmapidx < txr->hn_chim_bmapmax,
-	    ("invalid chim bmap idx %u, chim bmap max %u",
-	     txr->hn_chim_bmapidx, txr->hn_chim_bmapmax));
-	mask = atomic_swap_long(
-	    &txr->hn_chim_free_bmap[txr->hn_chim_bmapidx], 0);
-	txr->hn_chim_avail_bmap[txr->hn_chim_bmapidx] |= mask;
-	if (txr->hn_chim_avail_bmap[txr->hn_chim_bmapidx] == 0) {
-		txr->hn_chim_bmapidx =
-		    (txr->hn_chim_bmapidx + 1) % txr->hn_chim_bmapmax;
-		tries++;
-		if (__predict_false(tries == txr->hn_chim_bmapmax))
-			return (HN_NVS_CHIM_IDX_INVALID);
-		goto retry;
-	}
-	goto again;
-}
-
-static __inline void
-hn_chim_free(struct hn_tx_ring *txr, uint32_t chim_idx)
-{
-	uint8_t idx;
-	u_long mask;
-
-	KASSERT(chim_idx < txr->hn_sc->hn_chim_cnt,
-	    ("invalid chim index %u, chim count %d", chim_idx,
-	     txr->hn_sc->hn_chim_cnt));
-	KASSERT(chim_idx >= txr->hn_chim_offset,
-	    ("invalid chim index %u, txr chim offset %u",
-	     chim_idx, txr->hn_chim_offset));
-	chim_idx -= txr->hn_chim_offset;
-
-	idx = chim_idx / LONG_BIT;
-	KASSERT(idx < txr->hn_chim_bmapmax,
-	    ("invalid chim bmap idx %u, chim bmap max %u",
-	     idx, txr->hn_chim_bmapmax));
-
-	mask = 1UL << (chim_idx % LONG_BIT);
-	KASSERT((txr->hn_chim_free_bmap[idx] & mask) == 0,
-	    ("invalid chim free bmap@%u 0x%lx, free mask 0x%lx",
-	     idx, txr->hn_chim_free_bmap[idx], mask));
-	atomic_set_long(&txr->hn_chim_free_bmap[idx], mask);
-}
-#endif
 
 #if defined(INET6) || defined(INET)
 /*
@@ -1661,7 +1584,7 @@ hn_txdesc_put(struct hn_tx_ring *txr, struct hn_txdesc *txd)
 	if (txd->chim_index != HN_NVS_CHIM_IDX_INVALID) {
 		KASSERT((txd->flags & HN_TXD_FLAG_DMAMAP) == 0,
 		    ("chim txd uses dmamap"));
-		hn_chim_free(txr, txd->chim_index);
+		hn_chim_free(txr->hn_sc, txd->chim_index);
 		txd->chim_index = HN_NVS_CHIM_IDX_INVALID;
 		txd->chim_size = 0;
 	} else if (txd->flags & HN_TXD_FLAG_DMAMAP) {
@@ -1956,7 +1879,7 @@ hn_try_txagg(struct ifnet *ifp, struct hn_tx_ring *txr, struct hn_txdesc *txd,
 	KASSERT(txr->hn_agg_txd == NULL, ("lingering aggregating txdesc"));
 
 	txr->hn_tx_chimney_tried++;
-	txd->chim_index = hn_chim_alloc(txr);
+	txd->chim_index = hn_chim_alloc(txr->hn_sc);
 	if (txd->chim_index == HN_NVS_CHIM_IDX_INVALID)
 		return (NULL);
 	txr->hn_tx_chimney++;
@@ -2616,7 +2539,6 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		 */
 		if (sc->hn_tx_ring[0].hn_chim_size > sc->hn_chim_szmax)
 			hn_set_chim_size(sc, sc->hn_chim_szmax);
-		hn_init_chim_bmap(sc);
 		hn_set_tso_maxsize(sc, hn_tso_maxlen, ifp->if_mtu);
 #if __FreeBSD_version >= 1100099
 		if (sc->hn_rx_ring[0].hn_lro.lro_length_lim <
@@ -2766,9 +2688,6 @@ hn_stop(struct hn_softc *sc, bool detaching)
 	atomic_clear_int(&ifp->if_drv_flags, IFF_DRV_OACTIVE);
 	for (i = 0; i < sc->hn_tx_ring_inuse; ++i)
 		sc->hn_tx_ring[i].hn_oactive = 0;
-
-	/* Reset chim bitmaps. */ 
-	hn_reset_chim_bmap(sc);
 
 	/*
 	 * If the VF is active, make sure the filter is not 0, even if
@@ -4033,79 +3952,6 @@ hn_set_chim_size(struct hn_softc *sc, int chim_size)
 		sc->hn_tx_ring[i].hn_chim_size = chim_size;
 }
 
-static __inline int
-hn_tx_ring_chimcnt(struct hn_softc *sc)
-{
-	int avail;
-
-	avail = sc->hn_chim_cnt / sc->hn_tx_ring_inuse;
-	if (avail > HN_TX_DESC_CNT)
-		avail = HN_TX_DESC_CNT;
-	return (avail);
-}
-
-static void
-hn_reset_chim_bmap(struct hn_softc *sc)
-{
-	struct hn_tx_ring *txr;
-	int i, avail;
-
-	/* Wipe out all free chim bitmaps. */
-	for (i = 0; i < sc->hn_tx_ring_cnt; ++i) {
-		txr = &sc->hn_tx_ring[i];
-		txr->hn_chim_bmapidx = 0;
-		memset(txr->hn_chim_free_bmap, 0,
-		    sizeof(txr->hn_chim_free_bmap));
-	}
-
-	/* Setup avail chim bitmaps. */
-	avail = hn_tx_ring_chimcnt(sc);
-	for (i = 0; i < sc->hn_tx_ring_inuse; ++i) {
-		int b;
-
-		txr = &sc->hn_tx_ring[i];
-		for (b = 0; b < avail; ++b) {
-			int idx = b / LONG_BIT, ofs = b % LONG_BIT;
-
-			KASSERT(idx < txr->hn_chim_bmapmax,
-			    ("invalid b %d", b));
-			txr->hn_chim_avail_bmap[idx] |= 1UL << ofs;
-		}
-	}
-}
-
-static void
-hn_init_chim_bmap(struct hn_softc *sc)
-{
-	struct hn_tx_ring *txr;
-	uint8_t bmap_max;
-	int i, avail;
-
-	avail = hn_tx_ring_chimcnt(sc);
-	bmap_max = howmany(avail, LONG_BIT);
-	KASSERT(bmap_max <= HN_CHIM_BMAP_MAX,
-	    ("invalid bmap max %u", bmap_max));
-
-	if_printf(sc->hn_ifp, "bmap_max %u, avail %d\n", bmap_max, avail);
-	for (i = 0; i < sc->hn_tx_ring_inuse; ++i) {
-		txr = &sc->hn_tx_ring[i];
-		txr->hn_chim_bmapmax = bmap_max;
-		txr->hn_chim_offset = i * avail;
-		if_printf(sc->hn_ifp, "txr%d chim offset %d\n", i,
-		    txr->hn_chim_offset);
-	}
-
-	/* Wipe out the unused ones. */
-	for (i = sc->hn_tx_ring_inuse; i < sc->hn_tx_ring_cnt; ++i) {
-		txr = &sc->hn_tx_ring[i];
-		txr->hn_chim_bmapmax = 0;
-		txr->hn_chim_offset = 0;
-	}
-
-	/* Reset chim bitmaps. */
-	hn_reset_chim_bmap(sc);
-}
-
 static void
 hn_set_tso_maxsize(struct hn_softc *sc, int tso_maxlen, int mtu)
 {
@@ -4144,7 +3990,6 @@ hn_fixup_tx_data(struct hn_softc *sc)
 	if (hn_tx_chimney_size > 0 &&
 	    hn_tx_chimney_size < sc->hn_chim_szmax)
 		hn_set_chim_size(sc, hn_tx_chimney_size);
-	hn_init_chim_bmap(sc);
 
 	csum_assist = 0;
 	if (sc->hn_caps & HN_CAP_IPCS)

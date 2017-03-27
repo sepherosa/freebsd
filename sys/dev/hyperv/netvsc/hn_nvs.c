@@ -290,15 +290,19 @@ hn_nvs_conn_chim(struct hn_softc *sc)
 	}
 
 	sc->hn_chim_szmax = sectsz;
+	sc->hn_chim_cnt = HN_CHIM_SIZE / sc->hn_chim_szmax;
 	if (HN_CHIM_SIZE % sc->hn_chim_szmax != 0) {
 		if_printf(sc->hn_ifp, "chimney sending sections are "
 		    "not properly aligned\n");
 	}
-	if (sc->hn_chim_szmax % CACHE_LINE_SIZE != 0) {
-		if_printf(sc->hn_ifp, "chimney sending section is "
-		    "not cache line aligned\n");
+	if (sc->hn_chim_cnt % LONG_BIT != 0) {
+		if_printf(sc->hn_ifp, "discard %d chimney sending sections\n",
+		    sc->hn_chim_cnt % LONG_BIT);
 	}
-	sc->hn_chim_cnt = HN_CHIM_SIZE / sc->hn_chim_szmax;
+
+	sc->hn_chim_bmap_cnt = sc->hn_chim_cnt / LONG_BIT;
+	sc->hn_chim_bmap = malloc(sc->hn_chim_bmap_cnt * sizeof(u_long),
+	    M_DEVBUF, M_WAITOK | M_ZERO);
 
 	/* Done! */
 	sc->hn_flags |= HN_FLAG_CHIM_CONNECTED;
@@ -433,6 +437,12 @@ hn_nvs_disconn_chim(struct hn_softc *sc)
 			sc->hn_flags |= HN_FLAG_CHIM_REF;
 		}
 		sc->hn_chim_gpadl = 0;
+	}
+
+	if (sc->hn_chim_bmap != NULL) {
+		free(sc->hn_chim_bmap, M_DEVBUF);
+		sc->hn_chim_bmap = NULL;
+		sc->hn_chim_bmap_cnt = 0;
 	}
 }
 
