@@ -2270,7 +2270,7 @@ hn_rxpkt(struct hn_rx_ring *rxr, const void *data, int dlen,
 	/* If the VF is active, inject the packet through the VF */
 	ifp = rxr->hn_vf ? rxr->hn_vf : rxr->hn_ifp;
 
-	if (ifp->if_drv_flags & IFF_DRV_RUNNING) {
+	if ((ifp->if_drv_flags & IFF_DRV_RUNNING) == 0) {
 		/*
 		 * NOTE:
 		 * See the NOTE of hn_rndis_init_fixat().  This
