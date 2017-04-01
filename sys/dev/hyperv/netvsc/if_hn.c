@@ -4431,9 +4431,10 @@ hn_transmit(struct ifnet *ifp, struct mbuf *m)
 #if defined(INET6) || defined(INET)
 			int tcpsyn = 0;
 
-			if ((m->m_pkthdr.csum_flags & CSUM_TSO) == 0 &&
+			if (m->m_pkthdr.len < 128 &&
 			    (m->m_pkthdr.csum_flags &
-			     (CSUM_IP_TCP | CSUM_IP6_TCP))) {
+			     (CSUM_IP_TCP | CSUM_IP6_TCP)) &&
+			    (m->m_pkthdr.csum_flags & CSUM_TSO) == 0) {
 				m = hn_check_tcpsyn(m, &tcpsyn);
 				if (__predict_false(m == NULL)) {
 					if_inc_counter(ifp,
