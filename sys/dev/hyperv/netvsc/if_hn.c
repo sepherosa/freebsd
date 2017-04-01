@@ -4718,7 +4718,7 @@ hn_synth_attach(struct hn_softc *sc, int mtu)
 #define ATTACHED_RNDIS		0x0004
 
 	struct ndis_rssprm_toeplitz *rss = &sc->hn_rss;
-	int error, nsubch, nchan, i;
+	int error, nsubch, nchan, i, rndis_inited;
 	uint32_t old_caps, attached = 0;
 
 	KASSERT((sc->hn_flags & HN_FLAG_SYNTH_ATTACHED) == 0,
@@ -4753,10 +4753,11 @@ hn_synth_attach(struct hn_softc *sc, int mtu)
 	/*
 	 * Attach RNDIS _after_ NVS is attached.
 	 */
-	error = hn_rndis_attach(sc, mtu);
+	error = hn_rndis_attach(sc, mtu, &rndis_inited);
+	if (rndis_inited)
+		attached |= ATTACHED_RNDIS;
 	if (error)
 		goto failed;
-	attached |= ATTACHED_RNDIS;
 
 	/*
 	 * Make sure capabilities are not changed.
