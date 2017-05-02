@@ -1074,6 +1074,7 @@ vmbus_alloc_resource(device_t dev, device_t child, int type, int *rid,
 static int
 vmbus_alloc_msi(device_t bus, device_t dev, int count, int maxcount, int *irqs)
 {
+
 	return (PCIB_ALLOC_MSI(device_get_parent(bus), dev, count, maxcount,
 	    irqs));
 }
@@ -1081,26 +1082,29 @@ vmbus_alloc_msi(device_t bus, device_t dev, int count, int maxcount, int *irqs)
 static int
 vmbus_release_msi(device_t bus, device_t dev, int count, int *irqs)
 {
+
 	return (PCIB_RELEASE_MSI(device_get_parent(bus), dev, count, irqs));
 }
 
 static int
 vmbus_alloc_msix(device_t bus, device_t dev, int *irq)
 {
+
 	return (PCIB_ALLOC_MSIX(device_get_parent(bus), dev, irq));
 }
 
 static int
 vmbus_release_msix(device_t bus, device_t dev, int irq)
 {
+
 	return (PCIB_RELEASE_MSIX(device_get_parent(bus), dev, irq));
 }
 
-/* XXX bypass parent. */
 static int
 vmbus_map_msi(device_t bus, device_t dev, int irq, uint64_t *addr,
 	uint32_t *data)
 {
+
 	return (PCIB_MAP_MSI(device_get_parent(bus), dev, irq, addr, data));
 }
 
