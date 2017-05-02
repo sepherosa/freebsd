@@ -71,6 +71,7 @@ struct vmbus_msghc {
 	struct hypercall_postmsg_in	mh_inprm_save;
 };
 
+static void			vmbus_identify(driver_t *, device_t);
 static int			vmbus_probe(device_t);
 static int			vmbus_attach(device_t);
 static int			vmbus_detach(device_t);
@@ -144,6 +145,7 @@ vmbus_chanmsg_handlers[VMBUS_CHANMSG_TYPE_MAX] = {
 
 static device_method_t vmbus_methods[] = {
 	/* Device interface */
+	DEVMETHOD(device_identify,		vmbus_identify),
 	DEVMETHOD(device_probe,			vmbus_probe),
 	DEVMETHOD(device_attach,		vmbus_attach),
 	DEVMETHOD(device_detach,		vmbus_detach),
@@ -190,7 +192,7 @@ static driver_t vmbus_driver = {
 
 static devclass_t vmbus_devclass;
 
-DRIVER_MODULE(vmbus, acpi, vmbus_driver, vmbus_devclass, NULL, NULL);
+DRIVER_MODULE(vmbus, pcib, vmbus_driver, vmbus_devclass, NULL, NULL);
 MODULE_DEPEND(vmbus, acpi, 1, 1, 1);
 MODULE_DEPEND(vmbus, pci, 1, 1, 1);
 MODULE_VERSION(vmbus, 1);
@@ -1275,18 +1277,25 @@ vmbus_free_mmio_res(device_t dev)
 }
 #endif	/* NEW_PCIB */
 
+static void
+vmbus_identify(driver_t *driver, device_t parent)
+{
+
+	if (device_get_unit(parent) != 0 || vm_guest != VM_GUEST_HV ||
+	    (hyperv_features & CPUID_HV_MSR_SYNIC) == 0)
+		return;
+	device_add_child(parent, "vmbus", -1);
+}
+
 static int
 vmbus_probe(device_t dev)
 {
-	char *id[] = { "VMBUS", NULL };
 
-	if (ACPI_ID_PROBE(device_get_parent(dev), dev, id) == NULL ||
-	    device_get_unit(dev) != 0 || vm_guest != VM_GUEST_HV ||
+	if (device_get_unit(dev) != 0 || vm_guest != VM_GUEST_HV ||
 	    (hyperv_features & CPUID_HV_MSR_SYNIC) == 0)
 		return (ENXIO);
 
 	device_set_desc(dev, "Hyper-V Vmbus");
-
 	return (BUS_PROBE_DEFAULT);
 }
 
