@@ -1068,43 +1068,37 @@ vmbus_alloc_resource(device_t dev, device_t child, int type, int *rid,
 	return (res);
 }
 
-static device_t
-get_nexus(device_t vmbus)
-{
-	device_t acpi = device_get_parent(vmbus);
-	device_t nexus = device_get_parent(acpi);
-	return (nexus);
-}
-
 static int
 vmbus_alloc_msi(device_t bus, device_t dev, int count, int maxcount, int *irqs)
 {
-	return (PCIB_ALLOC_MSI(get_nexus(bus), dev, count, maxcount, irqs));
+	return (PCIB_ALLOC_MSI(device_get_parent(bus), dev, count, maxcount,
+	    irqs));
 }
 
 static int
 vmbus_release_msi(device_t bus, device_t dev, int count, int *irqs)
 {
-	return (PCIB_RELEASE_MSI(get_nexus(bus), dev, count, irqs));
+	return (PCIB_RELEASE_MSI(device_get_parent(bus), dev, count, irqs));
 }
 
 static int
 vmbus_alloc_msix(device_t bus, device_t dev, int *irq)
 {
-	return (PCIB_ALLOC_MSIX(get_nexus(bus), dev, irq));
+	return (PCIB_ALLOC_MSIX(device_get_parent(bus), dev, irq));
 }
 
 static int
 vmbus_release_msix(device_t bus, device_t dev, int irq)
 {
-	return (PCIB_RELEASE_MSIX(get_nexus(bus), dev, irq));
+	return (PCIB_RELEASE_MSIX(device_get_parent(bus), dev, irq));
 }
 
+/* XXX bypass parent. */
 static int
 vmbus_map_msi(device_t bus, device_t dev, int irq, uint64_t *addr,
 	uint32_t *data)
 {
-	return (PCIB_MAP_MSI(get_nexus(bus), dev, irq, addr, data));
+	return (PCIB_MAP_MSI(device_get_parent(bus), dev, irq, addr, data));
 }
 
 static uint32_t
@@ -1218,36 +1212,44 @@ vmbus_get_crs(device_t dev, device_t vmbus_dev, enum parse_pass pass)
 static void
 vmbus_get_mmio_res_pass(device_t dev, enum parse_pass pass)
 {
-	device_t acpi0, pcib0 = NULL;
-	device_t *children;
-	int i, count;
+	device_t acpi0, parent;
 
-	/* Try to find _CRS on VMBus device */
-	vmbus_get_crs(dev, dev, pass);
+	parent = device_get_parent(dev);
 
-	/* Try to find _CRS on VMBus device's parent */
-	acpi0 = device_get_parent(dev);
-	vmbus_get_crs(acpi0, dev, pass);
+	acpi0 = device_get_parent(parent);
+	if (strcmp("acpi0", device_get_nameunit(acpi0)) == 0) {
+		device_t *children;
+		int count;
 
-	/* Try to locate pcib0 and find _CRS on it */
-	if (device_get_children(acpi0, &children, &count) != 0)
-		return;
+		/*
+		 * Try to locate VMBUS resources and find _CRS on them.
+		 */
+		if (device_get_children(acpi0, &children, &count) == 0) {
+			int i;
 
-	for (i = 0; i < count; i++) {
-		if (!device_is_attached(children[i]))
-			continue;
+			for (i = 0; i < count; ++i) {
+				if (!device_is_attached(children[i]))
+					continue;
 
-		if (strcmp("pcib0", device_get_nameunit(children[i])))
-			continue;
+				if (strcmp("vmbus_res",
+				    device_get_name(children[i])) == 0)
+					vmbus_get_crs(children[i], dev, pass);
+			}
+			free(children, M_TEMP);
+		}
 
-		pcib0 = children[i];
-		break;
+		/*
+		 * Try to find _CRS on acpi.
+		 */
+		vmbus_get_crs(acpi0, dev, pass);
+	} else {
+		device_printf(dev, "not grandchild of acpi\n");
 	}
 
-	if (pcib0)
-		vmbus_get_crs(pcib0, dev, pass);
-
-	free(children, M_TEMP);
+	/*
+	 * Try to find _CRS on parent.
+	 */
+	vmbus_get_crs(parent, dev, pass);
 }
 
 static void
