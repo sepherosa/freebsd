@@ -519,7 +519,6 @@ SYSCTL_PROC(_hw_hn, OID_AUTO, vflist, CTLFLAG_RD | CTLTYPE_STRING,
 static u_int			hn_cpu_index;	/* next CPU for channel */
 static struct taskqueue		**hn_tx_taskque;/* shared TX taskqueues */
 
-static struct rm_priotracker	hn_vfmap_lockpt;
 static struct rmlock		hn_vfmap_lock;
 static int			hn_vfmap_size;
 static struct ifnet		**hn_vfmap;
@@ -3444,6 +3443,7 @@ hn_vf_sysctl(SYSCTL_HANDLER_ARGS)
 static int
 hn_vflist_sysctl(SYSCTL_HANDLER_ARGS)
 {
+	struct rm_priotracker pt;
 	struct sbuf *sb;
 	int error, i;
 	bool first;
@@ -3456,7 +3456,7 @@ hn_vflist_sysctl(SYSCTL_HANDLER_ARGS)
 	if (sb == NULL)
 		return (ENOMEM);
 
-	rm_rlock(&hn_vfmap_lock, &hn_vfmap_lockpt);
+	rm_rlock(&hn_vfmap_lock, &pt);
 
 	first = true;
 	for (i = 0; i < hn_vfmap_size; ++i) {
@@ -3475,7 +3475,7 @@ hn_vflist_sysctl(SYSCTL_HANDLER_ARGS)
 		}
 	}
 
-	rm_runlock(&hn_vfmap_lock, &hn_vfmap_lockpt);
+	rm_runlock(&hn_vfmap_lock, &pt);
 
 	error = sbuf_finish(sb);
 	sbuf_delete(sb);
