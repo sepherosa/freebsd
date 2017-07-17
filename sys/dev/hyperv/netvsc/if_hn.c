@@ -314,6 +314,7 @@ static int			hn_polling_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_vf_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_rxvf_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_vflist_sysctl(SYSCTL_HANDLER_ARGS);
+static int			hn_vfmap_sysctl(SYSCTL_HANDLER_ARGS);
 
 static void			hn_stop(struct hn_softc *, bool);
 static void			hn_init_locked(struct hn_softc *);
@@ -516,6 +517,9 @@ SYSCTL_INT(_hw_hn, OID_AUTO, tx_agg_pkts, CTLFLAG_RDTUN,
 /* VF list */
 SYSCTL_PROC(_hw_hn, OID_AUTO, vflist, CTLFLAG_RD | CTLTYPE_STRING,
     0, 0, hn_vflist_sysctl, "A", "VF list");
+
+SYSCTL_PROC(_hw_hn, OID_AUTO, vfmap, CTLFLAG_RD | CTLTYPE_STRING,
+    0, 0, hn_vfmap_sysctl, "A", "VF mapping");
 
 static u_int			hn_cpu_index;	/* next CPU for channel */
 static struct taskqueue		**hn_tx_taskque;/* shared TX taskqueues */
@@ -3491,6 +3495,52 @@ hn_vflist_sysctl(SYSCTL_HANDLER_ARGS)
 				sbuf_printf(sb, "%s", ifp->if_xname);
 			else
 				sbuf_printf(sb, " %s", ifp->if_xname);
+			first = false;
+		}
+	}
+
+	rm_runlock(&hn_vfmap_lock, &pt);
+
+	error = sbuf_finish(sb);
+	sbuf_delete(sb);
+	return (error);
+}
+
+static int
+hn_vfmap_sysctl(SYSCTL_HANDLER_ARGS)
+{
+	struct rm_priotracker pt;
+	struct sbuf *sb;
+	int error, i;
+	bool first;
+
+	error = sysctl_wire_old_buffer(req, 0);
+	if (error != 0)
+		return (error);
+
+	sb = sbuf_new_for_sysctl(NULL, NULL, 128, req);
+	if (sb == NULL)
+		return (ENOMEM);
+
+	rm_rlock(&hn_vfmap_lock, &pt);
+
+	first = true;
+	for (i = 0; i < hn_vfmap_size; ++i) {
+		struct ifnet *ifp, *hn_ifp;
+
+		hn_ifp = hn_vfmap[i];
+		if (hn_ifp == NULL)
+			continue;
+
+		ifp = ifnet_byindex(i);
+		if (ifp != NULL) {
+			if (first) {
+				sbuf_printf(sb, "%s:%s", ifp->if_xname,
+				    hn_ifp->if_xname);
+			} else {
+				sbuf_printf(sb, " %s:%s", ifp->if_xname,
+				    hn_ifp->if_xname);
+			}
 			first = false;
 		}
 	}
