@@ -312,6 +312,7 @@ static int			hn_txagg_pktmax_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_txagg_align_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_polling_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_vf_sysctl(SYSCTL_HANDLER_ARGS);
+static int			hn_rxvf_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_vflist_sysctl(SYSCTL_HANDLER_ARGS);
 
 static void			hn_stop(struct hn_softc *, bool);
@@ -1432,6 +1433,9 @@ hn_attach(device_t dev)
 	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "vf",
 	    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, sc, 0,
 	    hn_vf_sysctl, "A", "Virtual Function's name");
+	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "rxvf",
+	    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, sc, 0,
+	    hn_rxvf_sysctl, "A", "activated Virtual Function's name");
 
 	/*
 	 * Setup the ifmedia, which has been initialized earlier.
@@ -3434,6 +3438,22 @@ hn_vf_sysctl(SYSCTL_HANDLER_ARGS)
 	HN_LOCK(sc);
 	vf_name[0] = '\0';
 	vf = sc->hn_vf_ifp;
+	if (vf != NULL)
+		snprintf(vf_name, sizeof(vf_name), "%s", if_name(vf));
+	HN_UNLOCK(sc);
+	return sysctl_handle_string(oidp, vf_name, sizeof(vf_name), req);
+}
+
+static int
+hn_rxvf_sysctl(SYSCTL_HANDLER_ARGS)
+{
+	struct hn_softc *sc = arg1;
+	char vf_name[IFNAMSIZ + 1];
+	struct ifnet *vf;
+
+	HN_LOCK(sc);
+	vf_name[0] = '\0';
+	vf = sc->hn_rx_ring[0].hn_rxvf_ifp;
 	if (vf != NULL)
 		snprintf(vf_name, sizeof(vf_name), "%s", if_name(vf));
 	HN_UNLOCK(sc);
