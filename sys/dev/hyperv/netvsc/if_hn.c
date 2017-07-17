@@ -983,7 +983,7 @@ hn_update_vf_task(void *arg, int pending __unused)
 {
 	struct hn_update_vf *uv = arg;
 
-	uv->rxr->hn_vf = uv->vf;
+	uv->rxr->hn_rxvf_ifp = uv->vf;
 }
 
 static void
@@ -1006,7 +1006,7 @@ hn_update_vf(struct hn_softc *sc, struct ifnet *vf)
 			uv.vf = vf;
 			vmbus_chan_run_task(rxr->hn_chan, &task);
 		} else {
-			rxr->hn_vf = vf;
+			rxr->hn_rxvf_ifp = vf;
 		}
 	}
 }
@@ -2447,7 +2447,7 @@ hn_rxpkt(struct hn_rx_ring *rxr, const void *data, int dlen,
 	int hash_type;
 
 	/* If the VF is active, inject the packet through the VF */
-	ifp = rxr->hn_vf ? rxr->hn_vf : rxr->hn_ifp;
+	ifp = rxr->hn_rxvf_ifp ? rxr->hn_rxvf_ifp : rxr->hn_ifp;
 
 	if ((ifp->if_drv_flags & IFF_DRV_RUNNING) == 0) {
 		/*
