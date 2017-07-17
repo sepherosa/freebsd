@@ -518,6 +518,7 @@ SYSCTL_INT(_hw_hn, OID_AUTO, tx_agg_pkts, CTLFLAG_RDTUN,
 SYSCTL_PROC(_hw_hn, OID_AUTO, vflist, CTLFLAG_RD | CTLTYPE_STRING,
     0, 0, hn_vflist_sysctl, "A", "VF list");
 
+/* VF mapping */
 SYSCTL_PROC(_hw_hn, OID_AUTO, vfmap, CTLFLAG_RD | CTLTYPE_STRING,
     0, 0, hn_vfmap_sysctl, "A", "VF mapping");
 
