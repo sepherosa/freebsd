@@ -258,6 +258,11 @@ static int			hn_ifmedia_upd(struct ifnet *);
 static void			hn_ifmedia_sts(struct ifnet *,
 				    struct ifmediareq *);
 
+static void			hn_ifnet_event(void *, struct ifnet *, int);
+static void			hn_ifaddr_event(void *, struct ifnet *);
+static void			hn_ifnet_attevent(void *, struct ifnet *);
+static void			hn_ifnet_detevent(void *, struct ifnet *);
+
 static int			hn_rndis_rxinfo(const void *, int,
 				    struct hn_rxinfo *);
 static void			hn_rndis_rx_data(struct hn_rx_ring *,
@@ -1102,6 +1107,69 @@ hn_ifaddr_event(void *arg, struct ifnet *ifp)
 	hn_set_vf(arg, ifp, ifp->if_flags & IFF_UP);
 }
 
+static void
+hn_ifnet_attevent(void *xsc, struct ifnet *ifp)
+{
+	struct hn_softc *sc = xsc;
+
+	HN_LOCK(sc);
+
+	if (!hn_ismyvf(sc, ifp))
+		goto done;
+
+	rm_wlock(&hn_vfmap_lock);
+
+	if (ifp->if_index >= hn_vfmap_size) {
+		struct ifnet **newmap;
+		int newsize;
+
+		newsize = ifp->if_index + HN_VFMAP_SIZE_DEF;
+		newmap = malloc(sizeof(struct ifnet *) * newsize, M_DEVBUF,
+		    M_WAITOK | M_ZERO);
+
+		memcpy(newmap, hn_vfmap,
+		    sizeof(struct ifnet *) * hn_vfmap_size);
+		free(hn_vfmap, M_DEVBUF);
+		hn_vfmap = newmap;
+		hn_vfmap_size = newsize;
+	}
+	KASSERT(hn_vfmap[ifp->if_index] == NULL,
+	    ("%s: ifindex %d was mapped to %s",
+	     ifp->if_xname, ifp->if_index, hn_vfmap[ifp->if_index]->if_xname));
+	hn_vfmap[ifp->if_index] = sc->hn_ifp;
+
+	rm_wunlock(&hn_vfmap_lock);
+done:
+	HN_UNLOCK(sc);
+}
+
+static void
+hn_ifnet_detevent(void *xsc, struct ifnet *ifp)
+{
+	struct hn_softc *sc = xsc;
+
+	HN_LOCK(sc);
+
+	if (!hn_ismyvf(sc, ifp))
+		goto done;
+
+	rm_wlock(&hn_vfmap_lock);
+
+	KASSERT(ifp->if_index < hn_vfmap_size,
+	    ("ifindex %d, vfmapsize %d", ifp->if_index, hn_vfmap_size));
+	if (hn_vfmap[ifp->if_index] != NULL) {
+		KASSERT(hn_vfmap[ifp->if_index] == sc->hn_ifp,
+		    ("%s: ifindex %d was mapped to %s",
+		     ifp->if_xname, ifp->if_index,
+		     hn_vfmap[ifp->if_index]->if_xname));
+		hn_vfmap[ifp->if_index] = NULL;
+	}
+
+	rm_wunlock(&hn_vfmap_lock);
+done:
+	HN_UNLOCK(sc);
+}
+
 /* {F8615163-DF3E-46c5-913F-F2D2F965ED0E} */
 static const struct hyperv_guid g_net_vsc_device_type = {
 	.hv_guid = {0x63, 0x51, 0x61, 0xF8, 0x3E, 0xDF, 0xc5, 0x46,
@@ -1432,9 +1500,13 @@ hn_attach(device_t dev)
 
 	sc->hn_ifnet_evthand = EVENTHANDLER_REGISTER(ifnet_event,
 	    hn_ifnet_event, sc, EVENTHANDLER_PRI_ANY);
-
 	sc->hn_ifaddr_evthand = EVENTHANDLER_REGISTER(ifaddr_event,
 	    hn_ifaddr_event, sc, EVENTHANDLER_PRI_ANY);
+
+	sc->hn_ifnet_atthand = EVENTHANDLER_REGISTER(ifnet_arrival_event,
+	    hn_ifnet_attevent, sc, EVENTHANDLER_PRI_ANY);
+	sc->hn_ifnet_dethand = EVENTHANDLER_REGISTER(ifnet_departure_event,
+	    hn_ifnet_detevent, sc, EVENTHANDLER_PRI_ANY);
 
 	return (0);
 failed:
@@ -1454,6 +1526,14 @@ hn_detach(device_t dev)
 		EVENTHANDLER_DEREGISTER(ifaddr_event, sc->hn_ifaddr_evthand);
 	if (sc->hn_ifnet_evthand != NULL)
 		EVENTHANDLER_DEREGISTER(ifnet_event, sc->hn_ifnet_evthand);
+	if (sc->hn_ifnet_atthand != NULL) {
+		EVENTHANDLER_DEREGISTER(ifnet_arrival_event,
+		    sc->hn_ifnet_atthand);
+	}
+	if (sc->hn_ifnet_dethand != NULL) {
+		EVENTHANDLER_DEREGISTER(ifnet_departure_event,
+		    sc->hn_ifnet_dethand);
+	}
 
 	if (sc->hn_xact != NULL && vmbus_chan_is_revoked(sc->hn_prichan)) {
 		/*

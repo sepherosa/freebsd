@@ -238,6 +238,8 @@ struct hn_softc {
 
 	eventhandler_tag	hn_ifaddr_evthand;
 	eventhandler_tag	hn_ifnet_evthand;
+	eventhandler_tag	hn_ifnet_atthand;
+	eventhandler_tag	hn_ifnet_dethand;
 };
 
 #define HN_FLAG_RXBUF_CONNECTED		0x0001
