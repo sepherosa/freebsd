@@ -1114,8 +1114,17 @@ hn_ifnet_attevent(void *xsc, struct ifnet *ifp)
 
 	HN_LOCK(sc);
 
+	if (!(sc->hn_flags & HN_FLAG_SYNTH_ATTACHED))
+		goto done;
+
 	if (!hn_ismyvf(sc, ifp))
 		goto done;
+
+	if (sc->hn_vf_ifp != NULL) {
+		if_printf(sc->hn_ifp, "%s was attached as VF\n",
+		    sc->hn_vf_ifp->if_xname);
+		goto done;
+	}
 
 	rm_wlock(&hn_vfmap_lock);
 
@@ -1139,6 +1148,8 @@ hn_ifnet_attevent(void *xsc, struct ifnet *ifp)
 	hn_vfmap[ifp->if_index] = sc->hn_ifp;
 
 	rm_wunlock(&hn_vfmap_lock);
+
+	sc->hn_vf_ifp = ifp;
 done:
 	HN_UNLOCK(sc);
 }
@@ -1150,8 +1161,13 @@ hn_ifnet_detevent(void *xsc, struct ifnet *ifp)
 
 	HN_LOCK(sc);
 
+	if (sc->hn_vf_ifp == NULL)
+		goto done;
+
 	if (!hn_ismyvf(sc, ifp))
 		goto done;
+
+	sc->hn_vf_ifp = NULL;
 
 	rm_wlock(&hn_vfmap_lock);
 
@@ -1520,7 +1536,7 @@ static int
 hn_detach(device_t dev)
 {
 	struct hn_softc *sc = device_get_softc(dev);
-	struct ifnet *ifp = sc->hn_ifp;
+	struct ifnet *ifp = sc->hn_ifp, *hn_ifp;
 
 	if (sc->hn_ifaddr_evthand != NULL)
 		EVENTHANDLER_DEREGISTER(ifaddr_event, sc->hn_ifaddr_evthand);
@@ -1534,6 +1550,11 @@ hn_detach(device_t dev)
 		EVENTHANDLER_DEREGISTER(ifnet_departure_event,
 		    sc->hn_ifnet_dethand);
 	}
+
+	hn_ifp = sc->hn_vf_ifp;
+	__compiler_membar();
+	if (hn_ifp != NULL)
+		hn_ifnet_detevent(sc, hn_ifp);
 
 	if (sc->hn_xact != NULL && vmbus_chan_is_revoked(sc->hn_prichan)) {
 		/*

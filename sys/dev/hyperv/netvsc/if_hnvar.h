@@ -174,6 +174,7 @@ struct hn_tx_ring {
  */
 struct hn_softc {
 	struct ifnet    *hn_ifp;
+	struct ifnet	*hn_vf_ifp;
 	struct ifmedia	hn_media;
 	device_t        hn_dev;
 	int             hn_if_flags;
