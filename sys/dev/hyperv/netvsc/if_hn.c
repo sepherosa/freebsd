@@ -3422,12 +3422,12 @@ static int
 hn_vf_sysctl(SYSCTL_HANDLER_ARGS)
 {
 	struct hn_softc *sc = arg1;
-	char vf_name[128];
+	char vf_name[IFNAMSIZ + 1];
 	struct ifnet *vf;
 
 	HN_LOCK(sc);
 	vf_name[0] = '\0';
-	vf = sc->hn_rx_ring[0].hn_vf;
+	vf = sc->hn_vf_ifp;
 	if (vf != NULL)
 		snprintf(vf_name, sizeof(vf_name), "%s", if_name(vf));
 	HN_UNLOCK(sc);
