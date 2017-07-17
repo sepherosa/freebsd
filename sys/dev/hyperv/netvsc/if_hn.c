@@ -312,7 +312,7 @@ static int			hn_txagg_pktmax_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_txagg_align_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_polling_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_vf_sysctl(SYSCTL_HANDLER_ARGS);
-static int			hn_vfmap_sysctl(SYSCTL_HANDLER_ARGS);
+static int			hn_vflist_sysctl(SYSCTL_HANDLER_ARGS);
 
 static void			hn_stop(struct hn_softc *, bool);
 static void			hn_init_locked(struct hn_softc *);
@@ -512,9 +512,9 @@ static int			hn_tx_agg_pkts = -1;
 SYSCTL_INT(_hw_hn, OID_AUTO, tx_agg_pkts, CTLFLAG_RDTUN,
     &hn_tx_agg_pkts, 0, "Packet transmission aggregation packet limit");
 
-/* VF mapping */
-SYSCTL_PROC(_hw_hn, OID_AUTO, vfmap, CTLFLAG_RD | CTLTYPE_STRING,
-    0, 0, hn_vfmap_sysctl, "A", "VF mapping");
+/* VF list */
+SYSCTL_PROC(_hw_hn, OID_AUTO, vflist, CTLFLAG_RD | CTLTYPE_STRING,
+    0, 0, hn_vflist_sysctl, "A", "VF list");
 
 static u_int			hn_cpu_index;	/* next CPU for channel */
 static struct taskqueue		**hn_tx_taskque;/* shared TX taskqueues */
@@ -3442,7 +3442,7 @@ hn_vf_sysctl(SYSCTL_HANDLER_ARGS)
 }
 
 static int
-hn_vfmap_sysctl(SYSCTL_HANDLER_ARGS)
+hn_vflist_sysctl(SYSCTL_HANDLER_ARGS)
 {
 	struct sbuf *sb;
 	int error, i;
