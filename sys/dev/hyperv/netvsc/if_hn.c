@@ -69,6 +69,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/module.h>
 #include <sys/queue.h>
 #include <sys/lock.h>
+#include <sys/rmlock.h>
 #include <sys/smp.h>
 #include <sys/socket.h>
 #include <sys/sockio.h>
@@ -118,6 +119,8 @@ __FBSDID("$FreeBSD$");
 #define HN_IFSTART_SUPPORT
 
 #define HN_RING_CNT_DEF_MAX		8
+
+#define HN_VFMAP_SIZE_DEF		8
 
 /* YYY should get it from the underlying channel */
 #define HN_TX_DESC_CNT			512
@@ -504,6 +507,10 @@ SYSCTL_INT(_hw_hn, OID_AUTO, tx_agg_pkts, CTLFLAG_RDTUN,
 
 static u_int			hn_cpu_index;	/* next CPU for channel */
 static struct taskqueue		**hn_tx_taskque;/* shared TX taskqueues */
+
+static struct rmlock		hn_vfmap_lock;
+static int			hn_vfmap_size;
+static struct ifnet		**hn_vfmap;
 
 #ifndef RSS
 static const uint8_t
@@ -5842,9 +5849,17 @@ hn_chan_callback(struct vmbus_channel *chan, void *xrxr)
 }
 
 static void
-hn_tx_taskq_create(void *arg __unused)
+hn_sysinit(void *arg __unused)
 {
 	int i;
+
+	/*
+	 * Initialize VF map.
+	 */
+	rm_init_flags(&hn_vfmap_lock, "hn_vfmap", RM_SLEEPABLE);
+	hn_vfmap_size = HN_VFMAP_SIZE_DEF;
+	hn_vfmap = malloc(sizeof(struct ifnet *) * hn_vfmap_size, M_DEVBUF,
+	    M_WAITOK | M_ZERO);
 
 	/*
 	 * Fix the # of TX taskqueues.
@@ -5882,11 +5897,10 @@ hn_tx_taskq_create(void *arg __unused)
 		    "hn tx%d", i);
 	}
 }
-SYSINIT(hn_txtq_create, SI_SUB_DRIVERS, SI_ORDER_SECOND,
-    hn_tx_taskq_create, NULL);
+SYSINIT(hn_sysinit, SI_SUB_DRIVERS, SI_ORDER_SECOND, hn_sysinit, NULL);
 
 static void
-hn_tx_taskq_destroy(void *arg __unused)
+hn_sysuninit(void *arg __unused)
 {
 
 	if (hn_tx_taskque != NULL) {
@@ -5896,6 +5910,9 @@ hn_tx_taskq_destroy(void *arg __unused)
 			taskqueue_free(hn_tx_taskque[i]);
 		free(hn_tx_taskque, M_DEVBUF);
 	}
+
+	if (hn_vfmap != NULL)
+		free(hn_vfmap, M_DEVBUF);
+	rm_destroy(&hn_vfmap_lock);
 }
-SYSUNINIT(hn_txtq_destroy, SI_SUB_DRIVERS, SI_ORDER_SECOND,
-    hn_tx_taskq_destroy, NULL);
+SYSUNINIT(hn_sysuninit, SI_SUB_DRIVERS, SI_ORDER_SECOND, hn_sysuninit, NULL);
