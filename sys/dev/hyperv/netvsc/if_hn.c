@@ -999,6 +999,30 @@ hn_update_vf(struct hn_softc *sc, struct ifnet *vf)
 	}
 }
 
+static __inline bool
+hn_ismyvf(const struct hn_softc *sc, const struct ifnet *ifp)
+{
+	const struct ifnet *hn_ifp;
+
+	hn_ifp = sc->hn_ifp;
+
+	if (ifp == hn_ifp)
+		return (false);
+
+	if (ifp->if_alloctype != IFT_ETHER)
+		return (false);
+
+	/* Ignore lagg/vlan interfaces */
+	if (strcmp(ifp->if_dname, "lagg") == 0 ||
+	    strcmp(ifp->if_dname, "vlan") == 0)
+		return (false);
+
+	if (bcmp(IF_LLADDR(ifp), IF_LLADDR(hn_ifp), ETHER_ADDR_LEN) != 0)
+		return (false);
+
+	return (true);
+}
+
 static void
 hn_set_vf(struct hn_softc *sc, struct ifnet *ifp, bool vf)
 {
@@ -1009,21 +1033,10 @@ hn_set_vf(struct hn_softc *sc, struct ifnet *ifp, bool vf)
 	if (!(sc->hn_flags & HN_FLAG_SYNTH_ATTACHED))
 		goto out;
 
+	if (!hn_ismyvf(sc, ifp))
+		goto out;
+
 	hn_ifp = sc->hn_ifp;
-
-	if (ifp == hn_ifp)
-		goto out;
-
-	if (ifp->if_alloctype != IFT_ETHER)
-		goto out;
-
-	/* Ignore lagg/vlan interfaces */
-	if (strcmp(ifp->if_dname, "lagg") == 0 ||
-	    strcmp(ifp->if_dname, "vlan") == 0)
-		goto out;
-
-	if (bcmp(IF_LLADDR(ifp), IF_LLADDR(hn_ifp), ETHER_ADDR_LEN) != 0)
-		goto out;
 
 	/* Now we're sure 'ifp' is a real VF device. */
 	if (vf) {
@@ -1037,7 +1050,7 @@ hn_set_vf(struct hn_softc *sc, struct ifnet *ifp, bool vf)
 			goto out;
 
 		sc->hn_flags &= ~HN_FLAG_VF;
-		if (sc->hn_ifp->if_drv_flags & IFF_DRV_RUNNING)
+		if (hn_ifp->if_drv_flags & IFF_DRV_RUNNING)
 			hn_rxfilter_config(sc);
 		else
 			hn_set_rxfilter(sc, NDIS_PACKET_TYPE_NONE);
@@ -1052,7 +1065,7 @@ hn_set_vf(struct hn_softc *sc, struct ifnet *ifp, bool vf)
 		hn_suspend_mgmt(sc);
 		sc->hn_link_flags &=
 		    ~(HN_LINK_FLAG_LINKUP | HN_LINK_FLAG_NETCHG);
-		if_link_state_change(sc->hn_ifp, LINK_STATE_DOWN);
+		if_link_state_change(hn_ifp, LINK_STATE_DOWN);
 	} else {
 		hn_resume_mgmt(sc);
 	}
