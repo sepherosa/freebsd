@@ -1,0 +1,49 @@
+#!/bin/sh
+
+#
+# If transparent VF is enabled, don't do anything.
+#
+
+sysctl -n hw.hn.vf_transparent > /dev/null 2>&1
+if [ $? -ne 0 ]
+then
+	# Old kernel; no transparent VF.
+	vf_transparent=0
+else
+	vf_transparent=`sysctl -n hw.hn.vf_transparent`
+fi
+
+if [ $vf_transparent -ne 0 ]
+then
+	exit 0
+fi
+
+#
+# Check to see whether $1 is a VF or not.
+# If $1 is a VF, bring it up now.
+#
+
+sysctl -n hw.hn.vflist > /dev/null 2>&1
+if [ $? -ne 0 ]
+then
+	# Old kernel; nothing could be done properly.
+	exit 0
+fi
+
+iface=$1
+vf_list=`sysctl -n hw.hn.vflist`
+
+for vf in $vf_list
+do
+	if [ $vf = $iface ]
+	then
+		#
+		# Linger a little bit mainly to make sure
+		# that $iface is fully attached.
+		#
+		sleep 2
+
+		ifconfig $iface up
+		break
+	fi
+done
