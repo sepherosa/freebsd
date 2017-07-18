@@ -1558,7 +1558,7 @@ hn_detach(device_t dev)
 	if (sc->hn_ifnet_evthand != NULL)
 		EVENTHANDLER_DEREGISTER(ifnet_event, sc->hn_ifnet_evthand);
 	if (sc->hn_ifnet_atthand != NULL) {
-		EVENTHANDLER_DEREGISTER(ifnet_arrival_event,
+		EVENTHANDLER_DEREGISTER(ether_ifattach_event,
 		    sc->hn_ifnet_atthand);
 	}
 	if (sc->hn_ifnet_dethand != NULL) {
