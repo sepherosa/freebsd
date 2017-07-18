@@ -1,5 +1,10 @@
 #!/bin/sh
 
+. /etc/rc.subr
+. /etc/network.subr
+
+load_rc_config netif
+
 #
 # Customized per-interface setup, e.g. hyperv_vfup.hn1
 #
@@ -51,7 +56,6 @@ then
 	#
 	ifconfig $lagg laggproto failover laggport $hn laggport $vf
 	ifconfig $lagg inet6 no_dad
-	ifconfig $lagg up
 
 	#
 	# Stop dhclient on hnX, if any.
@@ -76,13 +80,32 @@ then
 		fi
 	done
 
+	# TODO: Remove IPv6 addresses on hnX
+
+	#
+	# Use hnX's configuration for laggX
 	#
 	# NOTE-CUSTOMIZE:
 	# If this script is used as template for the customized
 	# per-interface setup, replace this with whatever you
 	# want to do with the laggX.
 	#
-	dhclient $lagg
+	if dhcpif $hn;
+	then
+		ifconfig $lagg up
+		if syncdhcpif $hn;
+		then
+			dhclient $lagg
+		else
+			dhclient -b $lagg
+		fi
+	else
+		ifconfig_args=`ifconfig_getargs $hn`
+		if [ -n "$ifconfig_args" ]
+		then
+			ifconfig $lagg $ifconfig_args
+		fi
+	fi
 else
 	#
 	# laggX exists.  Check whether VF was there or not.
