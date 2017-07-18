@@ -1551,7 +1551,7 @@ static int
 hn_detach(device_t dev)
 {
 	struct hn_softc *sc = device_get_softc(dev);
-	struct ifnet *ifp = sc->hn_ifp, *hn_ifp;
+	struct ifnet *ifp = sc->hn_ifp, *vf_ifp;
 
 	if (sc->hn_ifaddr_evthand != NULL)
 		EVENTHANDLER_DEREGISTER(ifaddr_event, sc->hn_ifaddr_evthand);
@@ -1566,10 +1566,10 @@ hn_detach(device_t dev)
 		    sc->hn_ifnet_dethand);
 	}
 
-	hn_ifp = sc->hn_vf_ifp;
+	vf_ifp = sc->hn_vf_ifp;
 	__compiler_membar();
-	if (hn_ifp != NULL)
-		hn_ifnet_detevent(sc, hn_ifp);
+	if (vf_ifp != NULL)
+		hn_ifnet_detevent(sc, vf_ifp);
 
 	if (sc->hn_xact != NULL && vmbus_chan_is_revoked(sc->hn_prichan)) {
 		/*
