@@ -801,7 +801,7 @@ hn_rxfilter_config(struct hn_softc *sc)
 	HN_LOCK_ASSERT(sc);
 
 	if ((ifp->if_flags & IFF_PROMISC) ||
-	    (sc->hn_flags & HN_FLAG_VF)) {
+	    (sc->hn_flags & HN_FLAG_RXVF)) {
 		filter = NDIS_PACKET_TYPE_PROMISCUOUS;
 	} else {
 		filter = NDIS_PACKET_TYPE_DIRECTED;
@@ -1064,16 +1064,16 @@ hn_set_vf(struct hn_softc *sc, struct ifnet *ifp, bool vf)
 
 	/* Now we're sure 'ifp' is a real VF device. */
 	if (vf) {
-		if (sc->hn_flags & HN_FLAG_VF)
+		if (sc->hn_flags & HN_FLAG_RXVF)
 			goto out;
 
-		sc->hn_flags |= HN_FLAG_VF;
+		sc->hn_flags |= HN_FLAG_RXVF;
 		hn_rxfilter_config(sc);
 	} else {
-		if (!(sc->hn_flags & HN_FLAG_VF))
+		if (!(sc->hn_flags & HN_FLAG_RXVF))
 			goto out;
 
-		sc->hn_flags &= ~HN_FLAG_VF;
+		sc->hn_flags &= ~HN_FLAG_RXVF;
 		if (hn_ifp->if_drv_flags & IFF_DRV_RUNNING)
 			hn_rxfilter_config(sc);
 		else
@@ -2902,7 +2902,7 @@ hn_stop(struct hn_softc *sc, bool detaching)
 	 * If the VF is active, make sure the filter is not 0, even if
 	 * the synthetic NIC is down.
 	 */
-	if (!detaching && (sc->hn_flags & HN_FLAG_VF))
+	if (!detaching && (sc->hn_flags & HN_FLAG_RXVF))
 		hn_rxfilter_config(sc);
 }
 
@@ -5445,7 +5445,7 @@ hn_suspend(struct hn_softc *sc)
 	hn_polling(sc, 0);
 
 	if ((sc->hn_ifp->if_drv_flags & IFF_DRV_RUNNING) ||
-	    (sc->hn_flags & HN_FLAG_VF))
+	    (sc->hn_flags & HN_FLAG_RXVF))
 		hn_suspend_data(sc);
 	hn_suspend_mgmt(sc);
 }
@@ -5535,7 +5535,7 @@ hn_resume(struct hn_softc *sc)
 {
 
 	if ((sc->hn_ifp->if_drv_flags & IFF_DRV_RUNNING) ||
-	    (sc->hn_flags & HN_FLAG_VF))
+	    (sc->hn_flags & HN_FLAG_RXVF))
 		hn_resume_data(sc);
 
 	/*
@@ -5544,7 +5544,7 @@ hn_resume(struct hn_softc *sc)
 	 * don't call hn_resume_mgmt() until the VF is deactivated in
 	 * hn_set_vf().
 	 */
-	if (!(sc->hn_flags & HN_FLAG_VF))
+	if (!(sc->hn_flags & HN_FLAG_RXVF))
 		hn_resume_mgmt(sc);
 
 	/*
