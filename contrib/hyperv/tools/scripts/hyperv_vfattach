@@ -34,8 +34,8 @@ then
 fi
 
 #
-# Check to see whether $1 is a VF or not.
-# If $1 is a VF, bring it up now.
+# Check to see whether $iface is a VF or not.
+# If $iface is a VF, bring it up now.
 #
 
 # for hyperv_vf_delay
