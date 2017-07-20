@@ -67,7 +67,13 @@ do
 		then
 			hyperv_vf_delay=2
 		fi
-		/usr/libexec/hyperv/hyperv_vfattach $iface $hyperv_vf_delay &
+		#
+		# NOTE:
+		# "(sleep ..; ifconfig .. up) > /dev/null 2>&1 &"
+		# does _not_ work.
+		#
+		daemon -f /usr/libexec/hyperv/hyperv_vfattach \
+		    $iface $hyperv_vf_delay
 		break
 	fi
 done
