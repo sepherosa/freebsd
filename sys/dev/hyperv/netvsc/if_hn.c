@@ -1099,12 +1099,12 @@ hn_rxvf_change(struct hn_softc *sc, struct ifnet *ifp, bool rxvf)
 		hn_resume_mgmt(sc);
 	}
 
-	devctl_notify("HYPERV_NIC_VF", if_name(hn_ifp),
+	devctl_notify("HYPERV_NIC_VF", hn_ifp->if_xname,
 	    rxvf ? "VF_UP" : "VF_DOWN", NULL);
 
 	if (bootverbose) {
 		if_printf(hn_ifp, "datapath is switched %s %s\n",
-		    rxvf ? "to" : "from", if_name(ifp));
+		    rxvf ? "to" : "from", ifp->if_xname);
 	}
 out:
 	HN_UNLOCK(sc);
