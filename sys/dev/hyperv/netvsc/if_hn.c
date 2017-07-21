@@ -222,7 +222,7 @@ struct hn_rxinfo {
 	uint32_t			hash_value;
 };
 
-struct hn_update_vf {
+struct hn_rxvf_setarg {
 	struct hn_rx_ring	*rxr;
 	struct ifnet		*vf;
 };
@@ -263,8 +263,13 @@ static void			hn_ifnet_event(void *, struct ifnet *, int);
 static void			hn_ifaddr_event(void *, struct ifnet *);
 static void			hn_ifnet_attevent(void *, struct ifnet *);
 static void			hn_ifnet_detevent(void *, struct ifnet *);
+
+static bool			hn_ismyvf(const struct hn_softc *,
+				    const struct ifnet *);
 static void			hn_rxvf_change(struct hn_softc *,
 				    struct ifnet *, bool);
+static void			hn_rxvf_set(struct hn_softc *, struct ifnet *);
+static void			hn_rxvf_set_task(void *, int);
 
 static int			hn_rndis_rxinfo(const void *, int,
 				    struct hn_rxinfo *);
@@ -993,31 +998,31 @@ hn_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr)
 }
 
 static void
-hn_update_vf_task(void *arg, int pending __unused)
+hn_rxvf_set_task(void *xarg, int pending __unused)
 {
-	struct hn_update_vf *uv = arg;
+	struct hn_rxvf_setarg *arg = xarg;
 
-	uv->rxr->hn_rxvf_ifp = uv->vf;
+	arg->rxr->hn_rxvf_ifp = arg->vf;
 }
 
 static void
-hn_update_vf(struct hn_softc *sc, struct ifnet *vf)
+hn_rxvf_set(struct hn_softc *sc, struct ifnet *vf)
 {
 	struct hn_rx_ring *rxr;
-	struct hn_update_vf uv;
+	struct hn_rxvf_setarg arg;
 	struct task task;
 	int i;
 
 	HN_LOCK_ASSERT(sc);
 
-	TASK_INIT(&task, 0, hn_update_vf_task, &uv);
+	TASK_INIT(&task, 0, hn_rxvf_set_task, &arg);
 
 	for (i = 0; i < sc->hn_rx_ring_cnt; ++i) {
 		rxr = &sc->hn_rx_ring[i];
 
 		if (i < sc->hn_rx_ring_inuse) {
-			uv.rxr = rxr;
-			uv.vf = vf;
+			arg.rxr = rxr;
+			arg.vf = vf;
 			vmbus_chan_run_task(rxr->hn_chan, &task);
 		} else {
 			rxr->hn_rxvf_ifp = vf;
@@ -1025,7 +1030,7 @@ hn_update_vf(struct hn_softc *sc, struct ifnet *vf)
 	}
 }
 
-static __inline bool
+static bool
 hn_ismyvf(const struct hn_softc *sc, const struct ifnet *ifp)
 {
 	const struct ifnet *hn_ifp;
@@ -1083,7 +1088,7 @@ hn_rxvf_change(struct hn_softc *sc, struct ifnet *ifp, bool rxvf)
 	hn_nvs_set_datapath(sc,
 	    rxvf ? HN_NVS_DATAPATH_VF : HN_NVS_DATAPATH_SYNTHETIC);
 
-	hn_update_vf(sc, rxvf ? ifp : NULL);
+	hn_rxvf_set(sc, rxvf ? ifp : NULL);
 
 	if (rxvf) {
 		hn_suspend_mgmt(sc);
