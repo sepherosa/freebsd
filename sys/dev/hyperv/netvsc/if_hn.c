@@ -224,7 +224,7 @@ struct hn_rxinfo {
 
 struct hn_rxvf_setarg {
 	struct hn_rx_ring	*rxr;
-	struct ifnet		*vf;
+	struct ifnet		*vf_ifp;
 };
 
 #define HN_RXINFO_VLAN			0x0001
@@ -1002,11 +1002,11 @@ hn_rxvf_set_task(void *xarg, int pending __unused)
 {
 	struct hn_rxvf_setarg *arg = xarg;
 
-	arg->rxr->hn_rxvf_ifp = arg->vf;
+	arg->rxr->hn_rxvf_ifp = arg->vf_ifp;
 }
 
 static void
-hn_rxvf_set(struct hn_softc *sc, struct ifnet *vf)
+hn_rxvf_set(struct hn_softc *sc, struct ifnet *vf_ifp)
 {
 	struct hn_rx_ring *rxr;
 	struct hn_rxvf_setarg arg;
@@ -1022,10 +1022,10 @@ hn_rxvf_set(struct hn_softc *sc, struct ifnet *vf)
 
 		if (i < sc->hn_rx_ring_inuse) {
 			arg.rxr = rxr;
-			arg.vf = vf;
+			arg.vf_ifp = vf_ifp;
 			vmbus_chan_run_task(rxr->hn_chan, &task);
 		} else {
-			rxr->hn_rxvf_ifp = vf;
+			rxr->hn_rxvf_ifp = vf_ifp;
 		}
 	}
 }
@@ -3445,13 +3445,13 @@ hn_vf_sysctl(SYSCTL_HANDLER_ARGS)
 {
 	struct hn_softc *sc = arg1;
 	char vf_name[IFNAMSIZ + 1];
-	struct ifnet *vf;
+	struct ifnet *vf_ifp;
 
 	HN_LOCK(sc);
 	vf_name[0] = '\0';
-	vf = sc->hn_vf_ifp;
-	if (vf != NULL)
-		snprintf(vf_name, sizeof(vf_name), "%s", if_name(vf));
+	vf_ifp = sc->hn_vf_ifp;
+	if (vf_ifp != NULL)
+		snprintf(vf_name, sizeof(vf_name), "%s", vf_ifp->if_xname);
 	HN_UNLOCK(sc);
 	return sysctl_handle_string(oidp, vf_name, sizeof(vf_name), req);
 }
@@ -3461,13 +3461,13 @@ hn_rxvf_sysctl(SYSCTL_HANDLER_ARGS)
 {
 	struct hn_softc *sc = arg1;
 	char vf_name[IFNAMSIZ + 1];
-	struct ifnet *vf;
+	struct ifnet *vf_ifp;
 
 	HN_LOCK(sc);
 	vf_name[0] = '\0';
-	vf = sc->hn_rx_ring[0].hn_rxvf_ifp;
-	if (vf != NULL)
-		snprintf(vf_name, sizeof(vf_name), "%s", if_name(vf));
+	vf_ifp = sc->hn_rx_ring[0].hn_rxvf_ifp;
+	if (vf_ifp != NULL)
+		snprintf(vf_name, sizeof(vf_name), "%s", vf_ifp->if_xname);
 	HN_UNLOCK(sc);
 	return sysctl_handle_string(oidp, vf_name, sizeof(vf_name), req);
 }
