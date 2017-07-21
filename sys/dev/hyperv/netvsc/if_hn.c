@@ -263,6 +263,8 @@ static void			hn_ifnet_event(void *, struct ifnet *, int);
 static void			hn_ifaddr_event(void *, struct ifnet *);
 static void			hn_ifnet_attevent(void *, struct ifnet *);
 static void			hn_ifnet_detevent(void *, struct ifnet *);
+static void			hn_rxvf_change(struct hn_softc *,
+				    struct ifnet *, bool);
 
 static int			hn_rndis_rxinfo(const void *, int,
 				    struct hn_rxinfo *);
@@ -1048,7 +1050,7 @@ hn_ismyvf(const struct hn_softc *sc, const struct ifnet *ifp)
 }
 
 static void
-hn_set_vf(struct hn_softc *sc, struct ifnet *ifp, bool vf)
+hn_rxvf_change(struct hn_softc *sc, struct ifnet *ifp, bool rxvf)
 {
 	struct ifnet *hn_ifp;
 
@@ -1059,11 +1061,9 @@ hn_set_vf(struct hn_softc *sc, struct ifnet *ifp, bool vf)
 
 	if (!hn_ismyvf(sc, ifp))
 		goto out;
-
 	hn_ifp = sc->hn_ifp;
 
-	/* Now we're sure 'ifp' is a real VF device. */
-	if (vf) {
+	if (rxvf) {
 		if (sc->hn_flags & HN_FLAG_RXVF)
 			goto out;
 
@@ -1081,11 +1081,11 @@ hn_set_vf(struct hn_softc *sc, struct ifnet *ifp, bool vf)
 	}
 
 	hn_nvs_set_datapath(sc,
-	    vf ? HN_NVS_DATAPATH_VF : HN_NVS_DATAPATH_SYNTHETIC);
+	    rxvf ? HN_NVS_DATAPATH_VF : HN_NVS_DATAPATH_SYNTHETIC);
 
-	hn_update_vf(sc, vf ? ifp : NULL);
+	hn_update_vf(sc, rxvf ? ifp : NULL);
 
-	if (vf) {
+	if (rxvf) {
 		hn_suspend_mgmt(sc);
 		sc->hn_link_flags &=
 		    ~(HN_LINK_FLAG_LINKUP | HN_LINK_FLAG_NETCHG);
@@ -1095,11 +1095,12 @@ hn_set_vf(struct hn_softc *sc, struct ifnet *ifp, bool vf)
 	}
 
 	devctl_notify("HYPERV_NIC_VF", if_name(hn_ifp),
-	    vf ? "VF_UP" : "VF_DOWN", NULL);
+	    rxvf ? "VF_UP" : "VF_DOWN", NULL);
 
-	if (bootverbose)
-		if_printf(hn_ifp, "Data path is switched %s %s\n",
-		    vf ? "to" : "from", if_name(ifp));
+	if (bootverbose) {
+		if_printf(hn_ifp, "datapath is switched %s %s\n",
+		    rxvf ? "to" : "from", if_name(ifp));
+	}
 out:
 	HN_UNLOCK(sc);
 }
@@ -1107,16 +1108,17 @@ out:
 static void
 hn_ifnet_event(void *arg, struct ifnet *ifp, int event)
 {
+
 	if (event != IFNET_EVENT_UP && event != IFNET_EVENT_DOWN)
 		return;
-
-	hn_set_vf(arg, ifp, event == IFNET_EVENT_UP);
+	hn_rxvf_change(arg, ifp, event == IFNET_EVENT_UP);
 }
 
 static void
 hn_ifaddr_event(void *arg, struct ifnet *ifp)
 {
-	hn_set_vf(arg, ifp, ifp->if_flags & IFF_UP);
+
+	hn_rxvf_change(arg, ifp, ifp->if_flags & IFF_UP);
 }
 
 static void
@@ -5540,9 +5542,9 @@ hn_resume(struct hn_softc *sc)
 
 	/*
 	 * When the VF is activated, the synthetic interface is changed
-	 * to DOWN in hn_set_vf(). Here, if the VF is still active, we
-	 * don't call hn_resume_mgmt() until the VF is deactivated in
-	 * hn_set_vf().
+	 * to DOWN in hn_rxvf_change().  Here, if the VF is still active,
+	 * we don't call hn_resume_mgmt() until the VF is deactivated in
+	 * hn_rxvf_change().
 	 */
 	if (!(sc->hn_flags & HN_FLAG_RXVF))
 		hn_resume_mgmt(sc);
