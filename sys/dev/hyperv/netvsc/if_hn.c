@@ -1190,10 +1190,10 @@ hn_ifnet_attevent(void *xsc, struct ifnet *ifp)
 	if (hn_xpnt_vf && ifp->if_start != NULL) {
 		/*
 		 * ifnet.if_start is _not_ supported by transparent
-		 * mode VF.
+		 * mode VF; mainly due to the IFF_DRV_OACTIVE flag.
 		 */
-		if_printf(sc->hn_ifp, "%s uses if_start, ignore\n",
-		     ifp->if_xname);
+		if_printf(sc->hn_ifp, "%s uses if_start, which is unsupported "
+		    "in transparent VF mode.\n", ifp->if_xname);
 		goto done;
 	}
 
@@ -6160,6 +6160,18 @@ static void
 hn_sysinit(void *arg __unused)
 {
 	int i;
+
+#ifdef HN_IFSTART_SUPPORT
+	/*
+	 * Don't use ifnet.if_start if transparent VF mode is requested;
+	 * mainly due to the IFF_DRV_OACTIVE flag.
+	 */
+	if (hn_xpnt_vf && hn_use_if_start) {
+		hn_use_if_start = 0;
+		printf("hn: tranparent VF mode, if_transmit will be used, "
+		    "instead of if_start\n");
+	}
+#endif
 
 	/*
 	 * Initialize VF map.
