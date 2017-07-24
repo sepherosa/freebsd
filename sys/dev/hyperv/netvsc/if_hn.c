@@ -531,7 +531,7 @@ SYSCTL_PROC(_hw_hn, OID_AUTO, vfmap, CTLFLAG_RD | CTLTYPE_STRING,
 
 /* Transparent VF */
 static int			hn_transparent_vf= 0;
-SYSCTL_INT(_hw_hn, OID_AUTO, transparent_vf, CTLFLAG_RDTUN,
+SYSCTL_INT(_hw_hn, OID_AUTO, vf_transparent, CTLFLAG_RDTUN,
     &hn_transparent_vf, 0, "Transparent VF enabled");
 
 static u_int			hn_cpu_index;	/* next CPU for channel */
