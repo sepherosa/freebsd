@@ -270,6 +270,7 @@ static void			hn_rxvf_change(struct hn_softc *,
 				    struct ifnet *, bool);
 static void			hn_rxvf_set(struct hn_softc *, struct ifnet *);
 static void			hn_rxvf_set_task(void *, int);
+static void			hn_xpnt_vf_input(struct ifnet *, struct mbuf *);
 
 static int			hn_rndis_rxinfo(const void *, int,
 				    struct hn_rxinfo *);
@@ -530,9 +531,9 @@ SYSCTL_PROC(_hw_hn, OID_AUTO, vfmap, CTLFLAG_RD | CTLTYPE_STRING,
     0, 0, hn_vfmap_sysctl, "A", "VF mapping");
 
 /* Transparent VF */
-static int			hn_transparent_vf= 0;
+static int			hn_xpnt_vf = 0;
 SYSCTL_INT(_hw_hn, OID_AUTO, vf_transparent, CTLFLAG_RDTUN,
-    &hn_transparent_vf, 0, "Transparent VF enabled");
+    &hn_xpnt_vf, 0, "Transparent VF mod");
 
 static u_int			hn_cpu_index;	/* next CPU for channel */
 static struct taskqueue		**hn_tx_taskque;/* shared TX taskqueues */
@@ -1132,6 +1133,42 @@ hn_ifaddr_event(void *arg, struct ifnet *ifp)
 }
 
 static void
+hn_xpnt_vf_input(struct ifnet *ifp, struct mbuf *m)
+{
+	struct rm_priotracker pt;
+	struct ifnet *hn_ifp = NULL;
+	struct mbuf *mn;
+
+	/*
+	 * XXX racy, if hn(4) ever detached.
+	 */
+	rm_rlock(&hn_vfmap_lock, &pt);
+	if (ifp->if_index < hn_vfmap_size)
+		hn_ifp = hn_vfmap[ifp->if_index];
+	rm_runlock(&hn_vfmap_lock, &pt);
+
+	if (hn_ifp != NULL) {
+		/*
+		 * Fix up rcvif and go through hn(4)'s if_input.
+		 */
+		for (mn = m; mn != NULL; mn = mn->m_nextpkt)
+			mn->m_pkthdr.rcvif = hn_ifp;
+		hn_ifp->if_input(hn_ifp, m);
+	} else {
+		/*
+		 * In the middle of the transition; free this
+		 * mbuf chain.
+		 */
+		while (m != NULL) {
+			mn = m->m_nextpkt;
+			m->m_nextpkt = NULL;
+			m_freem(m);
+			m = mn;
+		}
+	}
+}
+
+static void
 hn_ifnet_attevent(void *xsc, struct ifnet *ifp)
 {
 	struct hn_softc *sc = xsc;
@@ -1147,6 +1184,16 @@ hn_ifnet_attevent(void *xsc, struct ifnet *ifp)
 	if (sc->hn_vf_ifp != NULL) {
 		if_printf(sc->hn_ifp, "%s was attached as VF\n",
 		    sc->hn_vf_ifp->if_xname);
+		goto done;
+	}
+
+	if (hn_xpnt_vf && ifp->if_start != NULL) {
+		/*
+		 * ifnet.if_start is _not_ supported by transparent
+		 * mode VF.
+		 */
+		if_printf(sc->hn_ifp, "%s uses if_start, ignore\n",
+		     ifp->if_xname);
 		goto done;
 	}
 
@@ -1174,6 +1221,18 @@ hn_ifnet_attevent(void *xsc, struct ifnet *ifp)
 	rm_wunlock(&hn_vfmap_lock);
 
 	sc->hn_vf_ifp = ifp;
+	if (hn_xpnt_vf) {
+		/*
+		 * Install if_input for vf_ifp, which does vf_ifp -> hn_ifp.
+		 * Save vf_ifp's current if_input for later restoration.
+		 */
+		sc->hn_vf_input = ifp->if_input;
+		ifp->if_input = hn_xpnt_vf_input;
+
+		if (sc->hn_ifp->if_drv_flags & IFF_DRV_RUNNING) {
+			/* TODO: up the VF after several seconds delay. */
+		}
+	}
 done:
 	HN_UNLOCK(sc);
 }
@@ -1192,6 +1251,12 @@ hn_ifnet_detevent(void *xsc, struct ifnet *ifp)
 		goto done;
 
 	sc->hn_vf_ifp = NULL;
+	if (hn_xpnt_vf) {
+		KASSERT(sc->hn_vf_input != NULL, ("%s VF input is not saved",
+		    sc->hn_ifp->if_xname));
+		ifp->if_input = sc->hn_vf_input;
+		sc->hn_vf_input = NULL;
+	}
 
 	rm_wlock(&hn_vfmap_lock);
 
@@ -1450,9 +1515,11 @@ hn_attach(device_t dev)
 	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "vf",
 	    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, sc, 0,
 	    hn_vf_sysctl, "A", "Virtual Function's name");
-	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "rxvf",
-	    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, sc, 0,
-	    hn_rxvf_sysctl, "A", "activated Virtual Function's name");
+	if (!hn_xpnt_vf) {
+		SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "rxvf",
+		    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, sc, 0,
+		    hn_rxvf_sysctl, "A", "activated Virtual Function's name");
+	}
 
 	/*
 	 * Setup the ifmedia, which has been initialized earlier.
@@ -1541,10 +1608,12 @@ hn_attach(device_t dev)
 	sc->hn_mgmt_taskq = sc->hn_mgmt_taskq0;
 	hn_update_link_status(sc);
 
-	sc->hn_ifnet_evthand = EVENTHANDLER_REGISTER(ifnet_event,
-	    hn_ifnet_event, sc, EVENTHANDLER_PRI_ANY);
-	sc->hn_ifaddr_evthand = EVENTHANDLER_REGISTER(ifaddr_event,
-	    hn_ifaddr_event, sc, EVENTHANDLER_PRI_ANY);
+	if (!hn_xpnt_vf) {
+		sc->hn_ifnet_evthand = EVENTHANDLER_REGISTER(ifnet_event,
+		    hn_ifnet_event, sc, EVENTHANDLER_PRI_ANY);
+		sc->hn_ifaddr_evthand = EVENTHANDLER_REGISTER(ifaddr_event,
+		    hn_ifaddr_event, sc, EVENTHANDLER_PRI_ANY);
+	}
 
 	/*
 	 * NOTE:
