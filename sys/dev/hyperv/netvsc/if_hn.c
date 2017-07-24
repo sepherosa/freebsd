@@ -814,7 +814,7 @@ hn_rxfilter_config(struct hn_softc *sc)
 	HN_LOCK_ASSERT(sc);
 
 	if ((ifp->if_flags & IFF_PROMISC) ||
-	    (sc->hn_flags & HN_FLAG_RXVF)) {
+	    (sc->hn_flags & (HN_FLAG_RXVF | HN_FLAG_XPNT_VF))) {
 		filter = NDIS_PACKET_TYPE_PROMISCUOUS;
 	} else {
 		filter = NDIS_PACKET_TYPE_DIRECTED;
@@ -3017,6 +3017,27 @@ hn_init_locked(struct hn_softc *sc)
 
 	/* Clear TX 'suspended' bit. */
 	hn_resume_tx(sc, sc->hn_tx_ring_inuse);
+
+	if (hn_xpnt_vf && sc->hn_vf_ifp != NULL) {
+		struct ifnet *vf_ifp = sc->hn_vf_ifp;
+
+		vf_ifp->if_flags |= IFF_UP;
+		vf_ifp->if_init(vf_ifp->if_softc);
+
+		/*
+		 * NOTE:
+		 * Datapth setting must happen _after_ vf_ifp
+		 * if_init.
+		 */
+		hn_nvs_set_datapath(sc, HN_NVS_DATAPATH_VF);
+		sc->hn_flags |= HN_FLAG_XPNT_VF;
+
+		/*
+		 * Re-configure RX filter, after setting
+		 * HN_FLAG_XPNT_VF
+		 */
+		hn_rxfilter_config(sc);
+	}
 
 	/* Everything is ready; unleash! */
 	atomic_set_int(&ifp->if_drv_flags, IFF_DRV_RUNNING);
