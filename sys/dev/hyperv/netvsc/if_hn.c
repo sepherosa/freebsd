@@ -4728,9 +4728,9 @@ hn_transmit(struct ifnet *ifp, struct mbuf *m)
 	struct hn_tx_ring *txr;
 	int error, idx = 0;
 
-	if (sc->hn_flags & HN_FLAG_TXVF) {
+	if (sc->hn_flags & HN_FLAG_XPNT_VF) {
 		sx_slock(&sc->hn_lock);
-		if (sc->hn_flags & HN_FLAG_TXVF) {
+		if (sc->hn_flags & HN_FLAG_XPNT_VF) {
 			error = sc->hn_vf_ifp->if_transmit(sc->hn_vf_ifp, m);
 			sx_sunlock(&sc->hn_lock);
 			/* DONE! */
@@ -4838,7 +4838,7 @@ hn_xmit_qflush(struct ifnet *ifp)
 	if_qflush(ifp);
 
 	HN_LOCK(sc);
-	if (sc->hn_flags & HN_FLAG_TXVF)
+	if (sc->hn_flags & HN_FLAG_XPNT_VF)
 		sc->hn_vf_ifp->if_qflush(sc->hn_vf_ifp);
 	HN_UNLOCK(sc);
 }
