@@ -529,6 +529,11 @@ SYSCTL_PROC(_hw_hn, OID_AUTO, vflist, CTLFLAG_RD | CTLTYPE_STRING,
 SYSCTL_PROC(_hw_hn, OID_AUTO, vfmap, CTLFLAG_RD | CTLTYPE_STRING,
     0, 0, hn_vfmap_sysctl, "A", "VF mapping");
 
+/* Transparent VF */
+static int			hn_transparent_vf= 0;
+SYSCTL_INT(_hw_hn, OID_AUTO, transparent_vf, CTLFLAG_RDTUN,
+    &hn_transparent_vf, 0, "Transparent VF enabled");
+
 static u_int			hn_cpu_index;	/* next CPU for channel */
 static struct taskqueue		**hn_tx_taskque;/* shared TX taskqueues */
 
