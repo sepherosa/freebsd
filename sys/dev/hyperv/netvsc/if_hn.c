@@ -4728,6 +4728,17 @@ hn_transmit(struct ifnet *ifp, struct mbuf *m)
 	struct hn_tx_ring *txr;
 	int error, idx = 0;
 
+	if (sc->hn_flags & HN_FLAG_TXVF) {
+		sx_slock(&sc->hn_lock);
+		if (sc->hn_flags & HN_FLAG_TXVF) {
+			error = sc->hn_vf_ifp->if_transmit(sc->hn_vf_ifp, m);
+			sx_sunlock(&sc->hn_lock);
+			/* DONE! */
+			return (error);
+		}
+		sx_sunlock(&sc->hn_lock);
+	}
+
 #if defined(INET6) || defined(INET)
 	/*
 	 * Perform TSO packet header fixup now, since the TSO
@@ -4825,6 +4836,11 @@ hn_xmit_qflush(struct ifnet *ifp)
 	for (i = 0; i < sc->hn_tx_ring_inuse; ++i)
 		hn_tx_ring_qflush(&sc->hn_tx_ring[i]);
 	if_qflush(ifp);
+
+	HN_LOCK(sc);
+	if (sc->hn_flags & HN_FLAG_TXVF)
+		sc->hn_vf_ifp->if_qflush(sc->hn_vf_ifp);
+	HN_UNLOCK(sc);
 }
 
 static void
