@@ -2984,6 +2984,15 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
+		HN_LOCK(sc);
+		if (sc->hn_vf_ifp != NULL &&
+		    (sc->hn_xvf_flags & HN_XVFFLAG_ENABLED)) {
+			error = sc->hn_vf_ifp->if_ioctl(sc->hn_vf_ifp,
+			    cmd, data);
+			HN_UNLOCK(sc);
+			break;
+		}
+		HN_UNLOCK(sc);
 		error = ifmedia_ioctl(ifp, ifr, &sc->hn_media, cmd);
 		break;
 
