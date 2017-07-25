@@ -1317,7 +1317,7 @@ hn_attach(device_t dev)
 	sc->hn_dev = dev;
 	sc->hn_prichan = vmbus_get_channel(dev);
 	HN_LOCK_INIT(sc);
-	rm_init(&sc->hn_vf_lock, device_get_nameunit(dev));
+	rm_init(&sc->hn_vf_lock, "hnvf");
 
 	/*
 	 * Initialize these tunables once.
@@ -1720,6 +1720,7 @@ hn_detach(device_t dev)
 	if_free(ifp);
 
 	HN_LOCK_DESTROY(sc);
+	rm_destroy(&sc->hn_vf_lock);
 	return (0);
 }
 
