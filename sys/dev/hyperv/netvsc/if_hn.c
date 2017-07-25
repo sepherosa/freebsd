@@ -323,6 +323,7 @@ static int			hn_vf_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_rxvf_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_vflist_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_vfmap_sysctl(SYSCTL_HANDLER_ARGS);
+static int			hn_xpnt_vf_accbpf_sysctl(SYSCTL_HANDLER_ARGS);
 
 static void			hn_stop(struct hn_softc *, bool);
 static void			hn_init_locked(struct hn_softc *);
@@ -1323,6 +1324,8 @@ hn_attach(device_t dev)
 	sc->hn_prichan = vmbus_get_channel(dev);
 	HN_LOCK_INIT(sc);
 	rm_init(&sc->hn_vf_lock, "hnvf");
+	if (hn_xpnt_vf && hn_xpnt_vf_accbpf)
+		sc->hn_xvf_flags |= HN_XVFFLAG_ACCBPF;
 
 	/*
 	 * Initialize these tunables once.
@@ -1536,6 +1539,12 @@ hn_attach(device_t dev)
 		SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "rxvf",
 		    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, sc, 0,
 		    hn_rxvf_sysctl, "A", "activated Virtual Function's name");
+	}
+	if (hn_xpnt_vf) {
+		SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "vf_xpnt_accbpf",
+		    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_MPSAFE, sc, 0,
+		    hn_xpnt_vf_accbpf_sysctl, "I",
+		    "Accurate BPF for transparent VF");
 	}
 
 	/*
@@ -3685,6 +3694,31 @@ hn_vfmap_sysctl(SYSCTL_HANDLER_ARGS)
 }
 
 static int
+hn_xpnt_vf_accbpf_sysctl(SYSCTL_HANDLER_ARGS)
+{
+	struct hn_softc *sc = arg1;
+	int error, onoff = 0;
+
+	if (sc->hn_xvf_flags & HN_XVFFLAG_ACCBPF)
+		onoff = 1;
+	error = sysctl_handle_int(oidp, &onoff, 0, req);
+	if (error || req->newptr == NULL)
+		return (error);
+
+	HN_LOCK(sc);
+	/* NOTE: hn_vf_lock for hn_transmit() */
+	rm_wlock(&sc->hn_vf_lock);
+	if (onoff)
+		sc->hn_xvf_flags |= HN_XVFFLAG_ACCBPF;
+	else
+		sc->hn_xvf_flags &= ~HN_XVFFLAG_ACCBPF;
+	rm_wunlock(&sc->hn_vf_lock);
+	HN_UNLOCK(sc);
+
+	return (0);
+}
+
+static int
 hn_check_iplen(const struct mbuf *m, int hoff)
 {
 	const struct ip *ip;
@@ -4777,10 +4811,31 @@ hn_transmit(struct ifnet *ifp, struct mbuf *m)
 
 		rm_rlock(&sc->hn_vf_lock, &pt);
 		if (__predict_true(sc->hn_xvf_flags & HN_XVFFLAG_ENABLED)) {
-			ETHER_BPF_MTAP(ifp, m);
+			struct mbuf *m_bpf = NULL;
+
+			if (sc->hn_xvf_flags & HN_XVFFLAG_ACCBPF) {
+				if (bpf_peers_present(ifp->if_bpf)) {
+					m_bpf = m_copypacket(m, M_NOWAIT);
+					if (m_bpf == NULL) {
+						/*
+						 * Failed to grab a shallow
+						 * copy; tap now.
+						 */
+						ETHER_BPF_MTAP(ifp, m);
+					}
+				}
+			} else {
+				ETHER_BPF_MTAP(ifp, m);
+			}
+
 			error = sc->hn_vf_ifp->if_transmit(sc->hn_vf_ifp, m);
 			rm_runlock(&sc->hn_vf_lock, &pt);
-			/* DONE! */
+
+			if (m_bpf != NULL) {
+				if (!error)
+					ETHER_BPF_MTAP(ifp, m_bpf);
+				m_freem(m_bpf);
+			}
 			return (error);
 		}
 		rm_runlock(&sc->hn_vf_lock, &pt);
