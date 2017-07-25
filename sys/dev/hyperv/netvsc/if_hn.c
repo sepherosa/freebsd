@@ -1099,7 +1099,7 @@ hn_rxvf_change(struct hn_softc *sc, struct ifnet *ifp, bool rxvf)
 	}
 
 	hn_nvs_set_datapath(sc,
-	    rxvf ? HN_NVS_DATAPATH_VF : HN_NVS_DATAPATH_SYNTHETIC);
+	    rxvf ? HN_NVS_DATAPATH_VF : HN_NVS_DATAPATH_SYNTH);
 
 	hn_rxvf_set(sc, rxvf ? ifp : NULL);
 
@@ -3014,11 +3014,43 @@ hn_stop(struct hn_softc *sc, bool detaching)
 	KASSERT(sc->hn_flags & HN_FLAG_SYNTH_ATTACHED,
 	    ("synthetic parts were not attached"));
 
+	/* Clear RUNNING bit ASAP. */
+	atomic_clear_int(&ifp->if_drv_flags, IFF_DRV_RUNNING);
+
 	/* Disable polling. */
 	hn_polling(sc, 0);
 
-	/* Clear RUNNING bit _before_ hn_suspend_data() */
-	atomic_clear_int(&ifp->if_drv_flags, IFF_DRV_RUNNING);
+	if (sc->hn_xvf_flags & HN_XVFFLAG_ENABLED) {
+		struct ifnet *vf_ifp;
+		struct ifreq ifr;
+
+		KASSERT(sc->hn_vf_ifp != NULL,
+		    ("%s: VF is not attached", ifp->if_xname));
+
+		/* NOTE: hn_vf_lock for hn_transmit() */
+		rm_wlock(&sc->hn_vf_lock);
+		sc->hn_xvf_flags &= ~HN_XVFFLAG_ENABLED;
+		rm_wunlock(&sc->hn_vf_lock);
+
+		/*
+		 * NOTE:
+		 * Datapath setting must happen _before_ bringing vf_ifp down.
+		 */
+		hn_nvs_set_datapath(sc, HN_NVS_DATAPATH_SYNTH);
+
+		/*
+		 * Bring VF down.
+		 */
+		vf_ifp = sc->hn_vf_ifp;
+		memset(&ifr, 0, sizeof(ifr));
+		strlcpy(ifr.ifr_name, vf_ifp->if_xname, sizeof(ifr.ifr_name));
+		vf_ifp->if_flags &= ~IFF_UP;
+		ifr.ifr_flags = vf_ifp->if_flags & 0xffff;
+		ifr.ifr_flagshigh = vf_ifp->if_flags >> 16;
+		vf_ifp->if_ioctl(vf_ifp, SIOCSIFFLAGS, (caddr_t)&ifr);
+	}
+
+	/* Suspend data transfers. */
 	hn_suspend_data(sc);
 
 	/* Clear OACTIVE bit. */
@@ -3027,8 +3059,8 @@ hn_stop(struct hn_softc *sc, bool detaching)
 		sc->hn_tx_ring[i].hn_oactive = 0;
 
 	/*
-	 * If the VF is active, make sure the filter is not 0, even if
-	 * the synthetic NIC is down.
+	 * If the non-transparent mode VF is active, make sure
+	 * that the RX filter still allows packet reception.
 	 */
 	if (!detaching && (sc->hn_flags & HN_FLAG_RXVF))
 		hn_rxfilter_config(sc);
@@ -3059,16 +3091,18 @@ hn_init_locked(struct hn_softc *sc)
 	/* Clear TX 'suspended' bit. */
 	hn_resume_tx(sc, sc->hn_tx_ring_inuse);
 
-	if (hn_xpnt_vf && sc->hn_vf_ifp != NULL &&
-	    (sc->hn_xvf_flags & HN_XVFFLAG_ENABLED) == 0) {
+	if (hn_xpnt_vf && sc->hn_vf_ifp != NULL) {
 		struct ifnet *vf_ifp = sc->hn_vf_ifp;
+
+		KASSERT((sc->hn_xvf_flags & HN_XVFFLAG_ENABLED) == 0,
+		    ("%s: transparent VF was enabled", ifp->if_xname));
 
 		vf_ifp->if_flags |= IFF_UP;
 		vf_ifp->if_init(vf_ifp->if_softc);
 
 		/*
 		 * NOTE:
-		 * Datapth setting must happen _after_ vf_ifp
+		 * Datapath setting must happen _after_ vf_ifp
 		 * if_init.
 		 */
 		hn_nvs_set_datapath(sc, HN_NVS_DATAPATH_VF);
