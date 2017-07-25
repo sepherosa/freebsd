@@ -324,6 +324,7 @@ static int			hn_rxvf_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_vflist_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_vfmap_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_xpnt_vf_accbpf_sysctl(SYSCTL_HANDLER_ARGS);
+static int			hn_xpnt_vf_enabled_sysctl(SYSCTL_HANDLER_ARGS);
 
 static void			hn_stop(struct hn_softc *, bool);
 static void			hn_init_locked(struct hn_softc *);
@@ -1541,6 +1542,10 @@ hn_attach(device_t dev)
 		    hn_rxvf_sysctl, "A", "activated Virtual Function's name");
 	}
 	if (hn_xpnt_vf) {
+		SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "vf_xpnt_enabled",
+		    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MPSAFE, sc, 0,
+		    hn_xpnt_vf_enabled_sysctl, "I",
+		    "Transparent VF enabled");
 		SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "vf_xpnt_accbpf",
 		    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_MPSAFE, sc, 0,
 		    hn_xpnt_vf_accbpf_sysctl, "I",
@@ -3716,6 +3721,17 @@ hn_xpnt_vf_accbpf_sysctl(SYSCTL_HANDLER_ARGS)
 	HN_UNLOCK(sc);
 
 	return (0);
+}
+
+static int
+hn_xpnt_vf_enabled_sysctl(SYSCTL_HANDLER_ARGS)
+{
+	struct hn_softc *sc = arg1;
+	int enabled = 0;
+
+	if (sc->hn_xvf_flags & HN_XVFFLAG_ENABLED)
+		enabled = 1;
+	return (sysctl_handle_int(oidp, &enabled, 0, req));
 }
 
 static int
