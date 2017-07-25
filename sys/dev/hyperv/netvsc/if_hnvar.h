@@ -174,17 +174,19 @@ struct hn_tx_ring {
  */
 struct hn_softc {
 	struct ifnet    *hn_ifp;
-	struct ifnet	*hn_vf_ifp;	/* SR-IOV VF */
 	struct ifmedia	hn_media;
 	device_t        hn_dev;
 	int             hn_if_flags;
-	uint32_t	hn_flags;	/* HN_FLAG_ */
 	struct sx	hn_lock;
 	struct vmbus_channel *hn_prichan;
 
 	int		hn_rx_ring_cnt;
 	int		hn_rx_ring_inuse;
 	struct hn_rx_ring *hn_rx_ring;
+
+	struct rmlock	hn_vf_lock;
+	struct ifnet	*hn_vf_ifp;	/* SR-IOV VF */
+	int		hn_vf_xpnt_en;	/* transparent VF enabled */
 
 	int		hn_tx_ring_cnt;
 	int		hn_tx_ring_inuse;
@@ -216,6 +218,7 @@ struct hn_softc {
 	uint32_t		hn_link_flags;	/* HN_LINK_FLAG_ */
 
 	uint32_t		hn_caps;	/* HN_CAP_ */
+	uint32_t		hn_flags;	/* HN_FLAG_ */
 	u_int			hn_pollhz;
 
 	void			*hn_rxbuf;
@@ -258,7 +261,6 @@ struct hn_softc {
 #define HN_FLAG_RXBUF_REF		0x0040
 #define HN_FLAG_CHIM_REF		0x0080
 #define HN_FLAG_RXVF			0x0100
-#define HN_FLAG_XPNT_VF			0x0200
 
 #define HN_FLAG_ERRORS			(HN_FLAG_RXBUF_REF | HN_FLAG_CHIM_REF)
 

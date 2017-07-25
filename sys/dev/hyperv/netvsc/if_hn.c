@@ -813,8 +813,8 @@ hn_rxfilter_config(struct hn_softc *sc)
 
 	HN_LOCK_ASSERT(sc);
 
-	if ((ifp->if_flags & IFF_PROMISC) ||
-	    (sc->hn_flags & (HN_FLAG_RXVF | HN_FLAG_XPNT_VF))) {
+	if ((ifp->if_flags & IFF_PROMISC) || (sc->hn_flags & HN_FLAG_RXVF) ||
+	    sc->hn_vf_xpnt_en) {
 		filter = NDIS_PACKET_TYPE_PROMISCUOUS;
 	} else {
 		filter = NDIS_PACKET_TYPE_DIRECTED;
@@ -1220,7 +1220,13 @@ hn_ifnet_attevent(void *xsc, struct ifnet *ifp)
 
 	rm_wunlock(&hn_vfmap_lock);
 
+	/* NOTE: hn_vf_lock for hn_transmit()/hn_qflush() */
+	rm_wlock(&sc->hn_vf_lock);
+	KASSERT(!sc->hn_vf_xpnt_en,
+	    ("%s: transparent VF was enabled", sc->hn_ifp->if_xname));
 	sc->hn_vf_ifp = ifp;
+	rm_wunlock(&sc->hn_vf_lock);
+
 	if (hn_xpnt_vf) {
 		/*
 		 * Install if_input for vf_ifp, which does vf_ifp -> hn_ifp.
@@ -1250,7 +1256,12 @@ hn_ifnet_detevent(void *xsc, struct ifnet *ifp)
 	if (!hn_ismyvf(sc, ifp))
 		goto done;
 
+	/* NOTE: hn_vf_lock for hn_transmit()/hn_qflush() */
+	rm_wlock(&sc->hn_vf_lock);
+	/* TODO: hn_vf_xpnt_en */
 	sc->hn_vf_ifp = NULL;
+	rm_wunlock(&sc->hn_vf_lock);
+
 	if (hn_xpnt_vf) {
 		KASSERT(sc->hn_vf_input != NULL, ("%s VF input is not saved",
 		    sc->hn_ifp->if_xname));
@@ -1306,6 +1317,7 @@ hn_attach(device_t dev)
 	sc->hn_dev = dev;
 	sc->hn_prichan = vmbus_get_channel(dev);
 	HN_LOCK_INIT(sc);
+	rm_init(&sc->hn_vf_lock, device_get_nameunit(dev));
 
 	/*
 	 * Initialize these tunables once.
@@ -3018,7 +3030,7 @@ hn_init_locked(struct hn_softc *sc)
 	/* Clear TX 'suspended' bit. */
 	hn_resume_tx(sc, sc->hn_tx_ring_inuse);
 
-	if (hn_xpnt_vf && sc->hn_vf_ifp != NULL) {
+	if (hn_xpnt_vf && sc->hn_vf_ifp != NULL && !sc->hn_vf_xpnt_en) {
 		struct ifnet *vf_ifp = sc->hn_vf_ifp;
 
 		vf_ifp->if_flags |= IFF_UP;
@@ -3030,11 +3042,14 @@ hn_init_locked(struct hn_softc *sc)
 		 * if_init.
 		 */
 		hn_nvs_set_datapath(sc, HN_NVS_DATAPATH_VF);
-		sc->hn_flags |= HN_FLAG_XPNT_VF;
+
+		/* NOTE: hn_vf_lock for hn_transmit()/hn_qflush() */
+		rm_wlock(&sc->hn_vf_lock);
+		sc->hn_vf_xpnt_en = 1;
+		rm_wunlock(&sc->hn_vf_lock);
 
 		/*
-		 * Re-configure RX filter, after setting
-		 * HN_FLAG_XPNT_VF
+		 * Re-configure RX filter, after setting hn_vf_xpnt_en.
 		 */
 		hn_rxfilter_config(sc);
 	}
@@ -4749,15 +4764,17 @@ hn_transmit(struct ifnet *ifp, struct mbuf *m)
 	struct hn_tx_ring *txr;
 	int error, idx = 0;
 
-	if (sc->hn_flags & HN_FLAG_XPNT_VF) {
-		sx_slock(&sc->hn_lock);
-		if (sc->hn_flags & HN_FLAG_XPNT_VF) {
+	if (sc->hn_vf_xpnt_en) {
+		struct rm_priotracker pt;
+
+		rm_rlock(&sc->hn_vf_lock, &pt);
+		if (__predict_true(sc->hn_vf_xpnt_en)) {
 			error = sc->hn_vf_ifp->if_transmit(sc->hn_vf_ifp, m);
-			sx_sunlock(&sc->hn_lock);
+			rm_runlock(&sc->hn_vf_lock, &pt);
 			/* DONE! */
 			return (error);
 		}
-		sx_sunlock(&sc->hn_lock);
+		rm_runlock(&sc->hn_vf_lock, &pt);
 	}
 
 #if defined(INET6) || defined(INET)
@@ -4852,16 +4869,17 @@ static void
 hn_xmit_qflush(struct ifnet *ifp)
 {
 	struct hn_softc *sc = ifp->if_softc;
+	struct rm_priotracker pt;
 	int i;
 
 	for (i = 0; i < sc->hn_tx_ring_inuse; ++i)
 		hn_tx_ring_qflush(&sc->hn_tx_ring[i]);
 	if_qflush(ifp);
 
-	HN_LOCK(sc);
-	if (sc->hn_flags & HN_FLAG_XPNT_VF)
+	rm_rlock(&sc->hn_vf_lock, &pt);
+	if (sc->hn_vf_xpnt_en)
 		sc->hn_vf_ifp->if_qflush(sc->hn_vf_ifp);
-	HN_UNLOCK(sc);
+	rm_runlock(&sc->hn_vf_lock, &pt);
 }
 
 static void
