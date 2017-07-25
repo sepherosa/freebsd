@@ -272,6 +272,7 @@ static void			hn_rxvf_set(struct hn_softc *, struct ifnet *);
 static void			hn_rxvf_set_task(void *, int);
 static void			hn_xpnt_vf_input(struct ifnet *, struct mbuf *);
 static int			hn_xpnt_vf_iocsetflags(struct hn_softc *);
+static void			hn_xpnt_vf_saveifflags(struct hn_softc *);
 
 static int			hn_rndis_rxinfo(const void *, int,
 				    struct hn_rxinfo *);
@@ -1154,6 +1155,22 @@ hn_xpnt_vf_iocsetflags(struct hn_softc *sc)
 	ifr.ifr_flags = vf_ifp->if_flags & 0xffff;
 	ifr.ifr_flagshigh = vf_ifp->if_flags >> 16;
 	return (vf_ifp->if_ioctl(vf_ifp, SIOCSIFFLAGS, (caddr_t)&ifr));
+}
+
+static void
+hn_xpnt_vf_saveifflags(struct hn_softc *sc)
+{
+	struct ifnet *ifp = sc->hn_ifp;
+	int allmulti = 0;
+
+	HN_LOCK_ASSERT(sc);
+
+	/* XXX vlan(4) style mcast addr maintenance */
+	if (!TAILQ_EMPTY(&ifp->if_multiaddrs))
+		allmulti = IFF_ALLMULTI;
+
+	/* Always set the VF's if_flags */
+	sc->hn_vf_ifp->if_flags = ifp->if_flags | allmulti;
 }
 
 static void
@@ -2907,10 +2924,8 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			break;
 		}
 
-		if (hn_xpnt_vf && sc->hn_vf_ifp != NULL) {
-			/* Always set the VF's if_flags */
-			sc->hn_vf_ifp->if_flags = ifp->if_flags;
-		}
+		if (hn_xpnt_vf && sc->hn_vf_ifp != NULL)
+			hn_xpnt_vf_saveifflags(sc);
 
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_drv_flags & IFF_DRV_RUNNING) {
@@ -3004,6 +3019,19 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			HN_SLEEPING_OK(sc);
 		}
 
+		/* XXX vlan(4) style mcast addr maintenance */
+		if (hn_xpnt_vf && sc->hn_vf_ifp != NULL) {
+			int old_if_flags;
+
+			old_if_flags = sc->hn_vf_ifp->if_flags;
+			hn_xpnt_vf_saveifflags(sc);
+
+			if ((sc->hn_xvf_flags & HN_XVFFLAG_ENABLED) &&
+			    ((old_if_flags ^ sc->hn_vf_ifp->if_flags) &
+			     IFF_ALLMULTI))
+				error = hn_xpnt_vf_iocsetflags(sc);
+		}
+
 		HN_UNLOCK(sc);
 		break;
 
@@ -3063,6 +3091,7 @@ hn_stop(struct hn_softc *sc, bool detaching)
 		/*
 		 * Bring the VF down.
 		 */
+		hn_xpnt_vf_saveifflags(sc);
 		sc->hn_vf_ifp->if_flags &= ~IFF_UP;
 		hn_xpnt_vf_iocsetflags(sc);
 	}
@@ -3109,18 +3138,27 @@ hn_init_locked(struct hn_softc *sc)
 	hn_resume_tx(sc, sc->hn_tx_ring_inuse);
 
 	if (hn_xpnt_vf && sc->hn_vf_ifp != NULL) {
-		struct ifnet *vf_ifp = sc->hn_vf_ifp;
+		int error;
 
 		KASSERT((sc->hn_xvf_flags & HN_XVFFLAG_ENABLED) == 0,
 		    ("%s: transparent VF was enabled", ifp->if_xname));
 
-		vf_ifp->if_flags |= IFF_UP;
-		vf_ifp->if_init(vf_ifp->if_softc);
+		/*
+		 * Bring the VF up.
+		 */
+		hn_xpnt_vf_saveifflags(sc);
+		sc->hn_vf_ifp->if_flags |= IFF_UP;
+		error = hn_xpnt_vf_iocsetflags(sc);
+		if (error) {
+			if_printf(ifp, "bringing up %s failed: %d\n",
+			    sc->hn_vf_ifp->if_xname, error);
+			goto done;
+		}
 
 		/*
 		 * NOTE:
-		 * Datapath setting must happen _after_ vf_ifp
-		 * if_init.
+		 * Datapath setting must happen _after_ bringing
+		 * the VF up.
 		 */
 		hn_nvs_set_datapath(sc, HN_NVS_DATAPATH_VF);
 
@@ -3135,7 +3173,7 @@ hn_init_locked(struct hn_softc *sc)
 		 */
 		hn_rxfilter_config(sc);
 	}
-
+done:
 	/* Everything is ready; unleash! */
 	atomic_set_int(&ifp->if_drv_flags, IFF_DRV_RUNNING);
 
