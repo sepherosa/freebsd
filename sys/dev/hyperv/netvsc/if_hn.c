@@ -271,6 +271,7 @@ static void			hn_rxvf_change(struct hn_softc *,
 static void			hn_rxvf_set(struct hn_softc *, struct ifnet *);
 static void			hn_rxvf_set_task(void *, int);
 static void			hn_xpnt_vf_input(struct ifnet *, struct mbuf *);
+static int			hn_xpnt_vf_iocsetflags(struct hn_softc *);
 
 static int			hn_rndis_rxinfo(const void *, int,
 				    struct hn_rxinfo *);
@@ -1139,8 +1140,24 @@ hn_ifaddr_event(void *arg, struct ifnet *ifp)
 	hn_rxvf_change(arg, ifp, ifp->if_flags & IFF_UP);
 }
 
+static int
+hn_xpnt_vf_iocsetflags(struct hn_softc *sc)
+{
+	struct ifnet *vf_ifp;
+	struct ifreq ifr;
+
+	HN_LOCK_ASSERT(sc);
+	vf_ifp = sc->hn_vf_ifp;
+
+	memset(&ifr, 0, sizeof(ifr));
+	strlcpy(ifr.ifr_name, vf_ifp->if_xname, sizeof(ifr.ifr_name));
+	ifr.ifr_flags = vf_ifp->if_flags & 0xffff;
+	ifr.ifr_flagshigh = vf_ifp->if_flags >> 16;
+	return (vf_ifp->if_ioctl(vf_ifp, SIOCSIFFLAGS, (caddr_t)&ifr));
+}
+
 static void
-hn_xpnt_vf_input(struct ifnet *ifp, struct mbuf *m)
+hn_xpnt_vf_input(struct ifnet *vf_ifp, struct mbuf *m)
 {
 	struct rm_priotracker pt;
 	struct ifnet *hn_ifp = NULL;
@@ -1150,8 +1167,8 @@ hn_xpnt_vf_input(struct ifnet *ifp, struct mbuf *m)
 	 * XXX racy, if hn(4) ever detached.
 	 */
 	rm_rlock(&hn_vfmap_lock, &pt);
-	if (ifp->if_index < hn_vfmap_size)
-		hn_ifp = hn_vfmap[ifp->if_index];
+	if (vf_ifp->if_index < hn_vfmap_size)
+		hn_ifp = hn_vfmap[vf_ifp->if_index];
 	rm_runlock(&hn_vfmap_lock, &pt);
 
 	if (hn_ifp != NULL) {
@@ -2890,6 +2907,11 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			break;
 		}
 
+		if (hn_xpnt_vf && sc->hn_vf_ifp != NULL) {
+			/* Always set the VF's if_flags */
+			sc->hn_vf_ifp->if_flags = ifp->if_flags;
+		}
+
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_drv_flags & IFF_DRV_RUNNING) {
 				/*
@@ -2900,6 +2922,9 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 				HN_NO_SLEEPING(sc);
 				hn_rxfilter_config(sc);
 				HN_SLEEPING_OK(sc);
+
+				if (sc->hn_xvf_flags & HN_XVFFLAG_ENABLED)
+					error = hn_xpnt_vf_iocsetflags(sc);
 			} else {
 				hn_init_locked(sc);
 			}
@@ -2985,8 +3010,7 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
 		HN_LOCK(sc);
-		if (sc->hn_vf_ifp != NULL &&
-		    (sc->hn_xvf_flags & HN_XVFFLAG_ENABLED)) {
+		if (sc->hn_xvf_flags & HN_XVFFLAG_ENABLED) {
 			error = sc->hn_vf_ifp->if_ioctl(sc->hn_vf_ifp,
 			    cmd, data);
 			HN_UNLOCK(sc);
@@ -3021,9 +3045,6 @@ hn_stop(struct hn_softc *sc, bool detaching)
 	hn_polling(sc, 0);
 
 	if (sc->hn_xvf_flags & HN_XVFFLAG_ENABLED) {
-		struct ifnet *vf_ifp;
-		struct ifreq ifr;
-
 		KASSERT(sc->hn_vf_ifp != NULL,
 		    ("%s: VF is not attached", ifp->if_xname));
 
@@ -3034,20 +3055,16 @@ hn_stop(struct hn_softc *sc, bool detaching)
 
 		/*
 		 * NOTE:
-		 * Datapath setting must happen _before_ bringing vf_ifp down.
+		 * Datapath setting must happen _before_ bringing
+		 * the VF down.
 		 */
 		hn_nvs_set_datapath(sc, HN_NVS_DATAPATH_SYNTH);
 
 		/*
-		 * Bring VF down.
+		 * Bring the VF down.
 		 */
-		vf_ifp = sc->hn_vf_ifp;
-		memset(&ifr, 0, sizeof(ifr));
-		strlcpy(ifr.ifr_name, vf_ifp->if_xname, sizeof(ifr.ifr_name));
-		vf_ifp->if_flags &= ~IFF_UP;
-		ifr.ifr_flags = vf_ifp->if_flags & 0xffff;
-		ifr.ifr_flagshigh = vf_ifp->if_flags >> 16;
-		vf_ifp->if_ioctl(vf_ifp, SIOCSIFFLAGS, (caddr_t)&ifr);
+		sc->hn_vf_ifp->if_flags &= ~IFF_UP;
+		hn_xpnt_vf_iocsetflags(sc);
 	}
 
 	/* Suspend data transfers. */
