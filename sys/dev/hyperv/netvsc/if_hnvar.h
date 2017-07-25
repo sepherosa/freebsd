@@ -186,7 +186,7 @@ struct hn_softc {
 
 	struct rmlock	hn_vf_lock;
 	struct ifnet	*hn_vf_ifp;	/* SR-IOV VF */
-	int		hn_vf_xpnt_en;	/* transparent VF enabled */
+	uint32_t	hn_xvf_flags;	/* transparent VF flags */
 
 	int		hn_tx_ring_cnt;
 	int		hn_tx_ring_inuse;
@@ -263,6 +263,9 @@ struct hn_softc {
 #define HN_FLAG_RXVF			0x0100
 
 #define HN_FLAG_ERRORS			(HN_FLAG_RXBUF_REF | HN_FLAG_CHIM_REF)
+
+#define HN_XVFFLAG_ENABLED		0x0001
+#define HN_XVFFLAG_ACCBPF		0x0002
 
 #define HN_NO_SLEEPING(sc)			\
 do {						\

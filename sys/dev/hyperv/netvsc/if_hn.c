@@ -535,6 +535,11 @@ static int			hn_xpnt_vf = 0;
 SYSCTL_INT(_hw_hn, OID_AUTO, vf_transparent, CTLFLAG_RDTUN,
     &hn_xpnt_vf, 0, "Transparent VF mod");
 
+/* Accurate BPF support for Transparent VF */
+static int			hn_xpnt_vf_accbpf = 0;
+SYSCTL_INT(_hw_hn, OID_AUTO, vf_xpnt_accbpf, CTLFLAG_RDTUN,
+    &hn_xpnt_vf_accbpf, 0, "Accurate BPF for transparent VF");
+
 static u_int			hn_cpu_index;	/* next CPU for channel */
 static struct taskqueue		**hn_tx_taskque;/* shared TX taskqueues */
 
@@ -814,7 +819,7 @@ hn_rxfilter_config(struct hn_softc *sc)
 	HN_LOCK_ASSERT(sc);
 
 	if ((ifp->if_flags & IFF_PROMISC) || (sc->hn_flags & HN_FLAG_RXVF) ||
-	    sc->hn_vf_xpnt_en) {
+	    (sc->hn_xvf_flags & HN_XVFFLAG_ENABLED)) {
 		filter = NDIS_PACKET_TYPE_PROMISCUOUS;
 	} else {
 		filter = NDIS_PACKET_TYPE_DIRECTED;
@@ -1222,7 +1227,7 @@ hn_ifnet_attevent(void *xsc, struct ifnet *ifp)
 
 	/* NOTE: hn_vf_lock for hn_transmit()/hn_qflush() */
 	rm_wlock(&sc->hn_vf_lock);
-	KASSERT(!sc->hn_vf_xpnt_en,
+	KASSERT((sc->hn_xvf_flags & HN_XVFFLAG_ENABLED) == 0,
 	    ("%s: transparent VF was enabled", sc->hn_ifp->if_xname));
 	sc->hn_vf_ifp = ifp;
 	rm_wunlock(&sc->hn_vf_lock);
@@ -1258,7 +1263,7 @@ hn_ifnet_detevent(void *xsc, struct ifnet *ifp)
 
 	/* NOTE: hn_vf_lock for hn_transmit()/hn_qflush() */
 	rm_wlock(&sc->hn_vf_lock);
-	/* TODO: hn_vf_xpnt_en */
+	/* TODO: (hn_xvf_flags & HN_XVFFLAG_ENABLED) */
 	sc->hn_vf_ifp = NULL;
 	rm_wunlock(&sc->hn_vf_lock);
 
@@ -3031,7 +3036,8 @@ hn_init_locked(struct hn_softc *sc)
 	/* Clear TX 'suspended' bit. */
 	hn_resume_tx(sc, sc->hn_tx_ring_inuse);
 
-	if (hn_xpnt_vf && sc->hn_vf_ifp != NULL && !sc->hn_vf_xpnt_en) {
+	if (hn_xpnt_vf && sc->hn_vf_ifp != NULL &&
+	    (sc->hn_xvf_flags & HN_XVFFLAG_ENABLED) == 0) {
 		struct ifnet *vf_ifp = sc->hn_vf_ifp;
 
 		vf_ifp->if_flags |= IFF_UP;
@@ -3046,11 +3052,12 @@ hn_init_locked(struct hn_softc *sc)
 
 		/* NOTE: hn_vf_lock for hn_transmit()/hn_qflush() */
 		rm_wlock(&sc->hn_vf_lock);
-		sc->hn_vf_xpnt_en = 1;
+		sc->hn_xvf_flags |= HN_XVFFLAG_ENABLED;
 		rm_wunlock(&sc->hn_vf_lock);
 
 		/*
-		 * Re-configure RX filter, after setting hn_vf_xpnt_en.
+		 * Re-configure RX filter, after setting
+		 * HN_XVFFLAG_ENABLED.
 		 */
 		hn_rxfilter_config(sc);
 	}
@@ -4765,11 +4772,12 @@ hn_transmit(struct ifnet *ifp, struct mbuf *m)
 	struct hn_tx_ring *txr;
 	int error, idx = 0;
 
-	if (sc->hn_vf_xpnt_en) {
+	if (sc->hn_xvf_flags & HN_XVFFLAG_ENABLED) {
 		struct rm_priotracker pt;
 
 		rm_rlock(&sc->hn_vf_lock, &pt);
-		if (__predict_true(sc->hn_vf_xpnt_en)) {
+		if (__predict_true(sc->hn_xvf_flags & HN_XVFFLAG_ENABLED)) {
+			ETHER_BPF_MTAP(ifp, m);
 			error = sc->hn_vf_ifp->if_transmit(sc->hn_vf_ifp, m);
 			rm_runlock(&sc->hn_vf_lock, &pt);
 			/* DONE! */
@@ -4878,7 +4886,7 @@ hn_xmit_qflush(struct ifnet *ifp)
 	if_qflush(ifp);
 
 	rm_rlock(&sc->hn_vf_lock, &pt);
-	if (sc->hn_vf_xpnt_en)
+	if (sc->hn_xvf_flags & HN_XVFFLAG_ENABLED)
 		sc->hn_vf_ifp->if_qflush(sc->hn_vf_ifp);
 	rm_runlock(&sc->hn_vf_lock, &pt);
 }
