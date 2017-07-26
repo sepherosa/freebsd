@@ -1310,8 +1310,10 @@ hn_xpnt_vf_init_taskfunc(void *xsc, int pending __unused)
 	if (sc->hn_xvf_flags & HN_XVFFLAG_ENABLED)
 		goto done;
 
-	/* Mark VF as ready. */
-	hn_xpnt_vf_setready(sc);
+	if (sc->hn_vf_rdytick != 0) {
+		/* Mark VF as ready. */
+		hn_xpnt_vf_setready(sc);
+	}
 
 	if (sc->hn_ifp->if_drv_flags & IFF_DRV_RUNNING) {
 		/*
