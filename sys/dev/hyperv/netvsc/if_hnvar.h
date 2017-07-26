@@ -251,6 +251,7 @@ struct hn_softc {
 	 */
 	void			(*hn_vf_input)
 				(struct ifnet *, struct mbuf *);
+	int			hn_vf_rdytick;	/* ticks, 0 == ready */
 };
 
 #define HN_FLAG_RXBUF_CONNECTED		0x0001

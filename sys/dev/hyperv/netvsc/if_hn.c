@@ -123,6 +123,8 @@ __FBSDID("$FreeBSD$");
 
 #define HN_VFMAP_SIZE_DEF		8
 
+#define HN_XPNT_VF_ATTWAIT_MIN		2	/* seconds */
+
 /* YYY should get it from the underlying channel */
 #define HN_TX_DESC_CNT			512
 
@@ -274,6 +276,7 @@ static void			hn_rxvf_set_task(void *, int);
 static void			hn_xpnt_vf_input(struct ifnet *, struct mbuf *);
 static int			hn_xpnt_vf_iocsetflags(struct hn_softc *);
 static void			hn_xpnt_vf_saveifflags(struct hn_softc *);
+static bool			hn_xpnt_vf_isready(struct hn_softc *);
 
 static int			hn_rndis_rxinfo(const void *, int,
 				    struct hn_rxinfo *);
@@ -544,6 +547,12 @@ SYSCTL_INT(_hw_hn, OID_AUTO, vf_transparent, CTLFLAG_RDTUN,
 static int			hn_xpnt_vf_accbpf = 0;
 SYSCTL_INT(_hw_hn, OID_AUTO, vf_xpnt_accbpf, CTLFLAG_RDTUN,
     &hn_xpnt_vf_accbpf, 0, "Accurate BPF for transparent VF");
+
+/* Extra wait for transparent VF attach routing; unit seconds. */
+static int			hn_xpnt_vf_attwait = HN_XPNT_VF_ATTWAIT_MIN;
+SYSCTL_INT(_hw_hn, OID_AUTO, vf_xpnt_attwait, CTLFLAG_RWTUN,
+    &hn_xpnt_vf_attwait, 0,
+    "Extra wait for transparent VF attach routing; unit: seconds");
 
 static u_int			hn_cpu_index;	/* next CPU for channel */
 static struct taskqueue		**hn_tx_taskque;/* shared TX taskqueues */
@@ -1210,6 +1219,25 @@ hn_xpnt_vf_input(struct ifnet *vf_ifp, struct mbuf *m)
 	}
 }
 
+static bool
+hn_xpnt_vf_isready(struct hn_softc *sc)
+{
+
+	HN_LOCK_ASSERT(sc);
+
+	if (!hn_xpnt_vf || sc->hn_vf_ifp == NULL)
+		return (false);
+
+	if (sc->hn_vf_rdytick == 0)
+		return (true);
+
+	if (sc->hn_vf_rdytick > ticks)
+		return (false);
+
+	sc->hn_vf_rdytick = 0;
+	return (true);
+}
+
 static void
 hn_ifnet_attevent(void *xsc, struct ifnet *ifp)
 {
@@ -1270,6 +1298,8 @@ hn_ifnet_attevent(void *xsc, struct ifnet *ifp)
 	rm_wunlock(&sc->hn_vf_lock);
 
 	if (hn_xpnt_vf) {
+		int wait_ticks;
+
 		/*
 		 * Install if_input for vf_ifp, which does vf_ifp -> hn_ifp.
 		 * Save vf_ifp's current if_input for later restoration.
@@ -1277,11 +1307,18 @@ hn_ifnet_attevent(void *xsc, struct ifnet *ifp)
 		sc->hn_vf_input = ifp->if_input;
 		ifp->if_input = hn_xpnt_vf_input;
 
+		/*
+		 * Stop link status management; use the VF's.
+		 */
 		hn_suspend_mgmt(sc);
 
-		if (sc->hn_ifp->if_drv_flags & IFF_DRV_RUNNING) {
-			/* TODO: up the VF after several seconds delay. */
-		}
+		/*
+		 * Give VF sometime to complete its attach routing.
+		 */
+		wait_ticks = hn_xpnt_vf_attwait * hz;
+		sc->hn_vf_rdytick = ticks + wait_ticks;
+
+		/* TODO: up the VF after several seconds delay. */
 	}
 done:
 	HN_UNLOCK(sc);
@@ -3058,7 +3095,7 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
 		HN_LOCK(sc);
-		if (sc->hn_xvf_flags & HN_XVFFLAG_ENABLED) {
+		if (hn_xpnt_vf_isready(sc)) {
 			error = sc->hn_vf_ifp->if_ioctl(sc->hn_vf_ifp,
 			    cmd, data);
 			HN_UNLOCK(sc);
@@ -6426,6 +6463,12 @@ hn_sysinit(void *arg __unused)
 		    "instead of if_start\n");
 	}
 #endif
+	if (hn_xpnt_vf_attwait < HN_XPNT_VF_ATTWAIT_MIN) {
+		printf("hn: invalid transparent VF attach routing "
+		    "wait timeout %d, reset to %d\n",
+		    hn_xpnt_vf_attwait, HN_XPNT_VF_ATTWAIT_MIN);
+		hn_xpnt_vf_attwait = HN_XPNT_VF_ATTWAIT_MIN;
+	}
 
 	/*
 	 * Initialize VF map.
