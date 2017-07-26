@@ -252,6 +252,8 @@ struct hn_softc {
 	void			(*hn_vf_input)
 				(struct ifnet *, struct mbuf *);
 	int			hn_vf_rdytick;	/* ticks, 0 == ready */
+	struct taskqueue	*hn_vf_taskq;
+	struct timeout_task	hn_vf_init;
 };
 
 #define HN_FLAG_RXBUF_CONNECTED		0x0001

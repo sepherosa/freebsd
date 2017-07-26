@@ -277,6 +277,9 @@ static void			hn_xpnt_vf_input(struct ifnet *, struct mbuf *);
 static int			hn_xpnt_vf_iocsetflags(struct hn_softc *);
 static void			hn_xpnt_vf_saveifflags(struct hn_softc *);
 static bool			hn_xpnt_vf_isready(struct hn_softc *);
+static void			hn_xpnt_vf_setready(struct hn_softc *);
+static void			hn_xpnt_vf_init_taskfunc(void *, int);
+static void			hn_xpnt_vf_init(struct hn_softc *);
 
 static int			hn_rndis_rxinfo(const void *, int,
 				    struct hn_rxinfo *);
@@ -1219,6 +1222,16 @@ hn_xpnt_vf_input(struct ifnet *vf_ifp, struct mbuf *m)
 	}
 }
 
+static void
+hn_xpnt_vf_setready(struct hn_softc *sc)
+{
+
+	HN_LOCK_ASSERT(sc);
+	sc->hn_vf_rdytick = 0;
+
+	/* TODO */
+}
+
 static bool
 hn_xpnt_vf_isready(struct hn_softc *sc)
 {
@@ -1234,8 +1247,84 @@ hn_xpnt_vf_isready(struct hn_softc *sc)
 	if (sc->hn_vf_rdytick > ticks)
 		return (false);
 
-	sc->hn_vf_rdytick = 0;
+	/* Mark VF as ready. */
+	hn_xpnt_vf_setready(sc);
 	return (true);
+}
+
+static void
+hn_xpnt_vf_init(struct hn_softc *sc)
+{
+	int error;
+
+	HN_LOCK_ASSERT(sc);
+
+	KASSERT((sc->hn_xvf_flags & HN_XVFFLAG_ENABLED) == 0,
+	    ("%s: transparent VF was enabled", sc->hn_ifp->if_xname));
+
+	if (bootverbose) {
+		if_printf(sc->hn_ifp, "try bringing up %s\n",
+		    sc->hn_vf_ifp->if_xname);
+	}
+
+	/*
+	 * Bring the VF up.
+	 */
+	hn_xpnt_vf_saveifflags(sc);
+	sc->hn_vf_ifp->if_flags |= IFF_UP;
+	error = hn_xpnt_vf_iocsetflags(sc);
+	if (error) {
+		if_printf(sc->hn_ifp, "bringing up %s failed: %d\n",
+		    sc->hn_vf_ifp->if_xname, error);
+		return;
+	}
+
+	/*
+	 * NOTE:
+	 * Datapath setting must happen _after_ bringing the VF up.
+	 */
+	hn_nvs_set_datapath(sc, HN_NVS_DATAPATH_VF);
+
+	/* NOTE: hn_vf_lock for hn_transmit()/hn_qflush() */
+	rm_wlock(&sc->hn_vf_lock);
+	sc->hn_xvf_flags |= HN_XVFFLAG_ENABLED;
+	rm_wunlock(&sc->hn_vf_lock);
+
+	/*
+	 * Re-configure RX filter, after setting HN_XVFFLAG_ENABLED.
+	 */
+	hn_rxfilter_config(sc);
+}
+
+static void
+hn_xpnt_vf_init_taskfunc(void *xsc, int pending __unused)
+{
+	struct hn_softc *sc = xsc;
+
+	HN_LOCK(sc);
+
+	if ((sc->hn_flags & HN_FLAG_SYNTH_ATTACHED) == 0)
+		goto done;
+	if (sc->hn_vf_ifp == NULL)
+		goto done;
+	if (sc->hn_xvf_flags & HN_XVFFLAG_ENABLED)
+		goto done;
+
+	/* Mark VF as ready. */
+	hn_xpnt_vf_setready(sc);
+
+	if (sc->hn_ifp->if_drv_flags & IFF_DRV_RUNNING) {
+		/*
+		 * Delayed VF initialization.
+		 */
+		if (bootverbose) {
+			if_printf(sc->hn_ifp, "delayed initialize %s\n",
+			    sc->hn_vf_ifp->if_xname);
+		}
+		hn_xpnt_vf_init(sc);
+	}
+done:
+	HN_UNLOCK(sc);
 }
 
 static void
@@ -1318,7 +1407,8 @@ hn_ifnet_attevent(void *xsc, struct ifnet *ifp)
 		wait_ticks = hn_xpnt_vf_attwait * hz;
 		sc->hn_vf_rdytick = ticks + wait_ticks;
 
-		/* TODO: up the VF after several seconds delay. */
+		taskqueue_enqueue_timeout(sc->hn_vf_taskq, &sc->hn_vf_init,
+		    wait_ticks);
 	}
 done:
 	HN_UNLOCK(sc);
@@ -1449,6 +1539,18 @@ hn_attach(device_t dev)
 	TASK_INIT(&sc->hn_netchg_init, 0, hn_netchg_init_taskfunc, sc);
 	TIMEOUT_TASK_INIT(sc->hn_mgmt_taskq0, &sc->hn_netchg_status, 0,
 	    hn_netchg_status_taskfunc, sc);
+
+	if (hn_xpnt_vf) {
+		/*
+		 * Setup taskqueue for VF tasks, e.g. delayed VF bringing up.
+		 */
+		sc->hn_vf_taskq = taskqueue_create("hn_vf", M_WAITOK,
+		    taskqueue_thread_enqueue, &sc->hn_vf_taskq);
+		taskqueue_start_threads(&sc->hn_vf_taskq, 1, PI_NET, "%s vf",
+		    device_get_nameunit(dev));
+		TIMEOUT_TASK_INIT(sc->hn_vf_taskq, &sc->hn_vf_init, 0,
+		    hn_xpnt_vf_init_taskfunc, sc);
+	}
 
 	/*
 	 * Allocate ifnet and setup its name earlier, so that if_printf
@@ -3194,43 +3296,11 @@ hn_init_locked(struct hn_softc *sc)
 	/* Clear TX 'suspended' bit. */
 	hn_resume_tx(sc, sc->hn_tx_ring_inuse);
 
-	if (hn_xpnt_vf && sc->hn_vf_ifp != NULL) {
-		int error;
-
-		KASSERT((sc->hn_xvf_flags & HN_XVFFLAG_ENABLED) == 0,
-		    ("%s: transparent VF was enabled", ifp->if_xname));
-
-		/*
-		 * Bring the VF up.
-		 */
-		hn_xpnt_vf_saveifflags(sc);
-		sc->hn_vf_ifp->if_flags |= IFF_UP;
-		error = hn_xpnt_vf_iocsetflags(sc);
-		if (error) {
-			if_printf(ifp, "bringing up %s failed: %d\n",
-			    sc->hn_vf_ifp->if_xname, error);
-			goto done;
-		}
-
-		/*
-		 * NOTE:
-		 * Datapath setting must happen _after_ bringing
-		 * the VF up.
-		 */
-		hn_nvs_set_datapath(sc, HN_NVS_DATAPATH_VF);
-
-		/* NOTE: hn_vf_lock for hn_transmit()/hn_qflush() */
-		rm_wlock(&sc->hn_vf_lock);
-		sc->hn_xvf_flags |= HN_XVFFLAG_ENABLED;
-		rm_wunlock(&sc->hn_vf_lock);
-
-		/*
-		 * Re-configure RX filter, after setting
-		 * HN_XVFFLAG_ENABLED.
-		 */
-		hn_rxfilter_config(sc);
+	if (hn_xpnt_vf_isready(sc)) {
+		/* Initialize transparent VF. */
+		hn_xpnt_vf_init(sc);
 	}
-done:
+
 	/* Everything is ready; unleash! */
 	atomic_set_int(&ifp->if_drv_flags, IFF_DRV_RUNNING);
 
