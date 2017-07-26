@@ -1276,6 +1276,8 @@ hn_ifnet_attevent(void *xsc, struct ifnet *ifp)
 		sc->hn_vf_input = ifp->if_input;
 		ifp->if_input = hn_xpnt_vf_input;
 
+		hn_suspend_mgmt(sc);
+
 		if (sc->hn_ifp->if_drv_flags & IFF_DRV_RUNNING) {
 			/* TODO: up the VF after several seconds delay. */
 		}
@@ -1308,6 +1310,7 @@ hn_ifnet_detevent(void *xsc, struct ifnet *ifp)
 		    sc->hn_ifp->if_xname));
 		ifp->if_input = sc->hn_vf_input;
 		sc->hn_vf_input = NULL;
+		hn_resume_mgmt(sc);
 	}
 
 	rm_wlock(&hn_vfmap_lock);
@@ -5864,7 +5867,8 @@ hn_resume(struct hn_softc *sc)
 	 * we don't call hn_resume_mgmt() until the VF is deactivated in
 	 * hn_rxvf_change().
 	 */
-	if (!(sc->hn_flags & HN_FLAG_RXVF))
+	if ((sc->hn_flags & HN_FLAG_RXVF) == 0 &&
+	    !(hn_xpnt_vf && sc->hn_vf_ifp != NULL))
 		hn_resume_mgmt(sc);
 
 	/*
