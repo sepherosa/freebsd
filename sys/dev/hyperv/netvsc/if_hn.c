@@ -263,6 +263,7 @@ static void			hn_ifnet_event(void *, struct ifnet *, int);
 static void			hn_ifaddr_event(void *, struct ifnet *);
 static void			hn_ifnet_attevent(void *, struct ifnet *);
 static void			hn_ifnet_detevent(void *, struct ifnet *);
+static void			hn_ifnet_lnkevent(void *, struct ifnet *, int);
 
 static bool			hn_ismyvf(const struct hn_softc *,
 				    const struct ifnet *);
@@ -1330,6 +1331,15 @@ done:
 	HN_UNLOCK(sc);
 }
 
+static void
+hn_ifnet_lnkevent(void *xsc, struct ifnet *ifp, int link_state)
+{
+	struct hn_softc *sc = xsc;
+
+	if (sc->hn_vf_ifp == ifp)
+		if_link_state_change(sc->hn_ifp, link_state);
+}
+
 /* {F8615163-DF3E-46c5-913F-F2D2F965ED0E} */
 static const struct hyperv_guid g_net_vsc_device_type = {
 	.hv_guid = {0x63, 0x51, 0x61, 0xF8, 0x3E, 0xDF, 0xc5, 0x46,
@@ -1694,6 +1704,11 @@ hn_attach(device_t dev)
 	sc->hn_ifnet_dethand = EVENTHANDLER_REGISTER(ifnet_departure_event,
 	    hn_ifnet_detevent, sc, EVENTHANDLER_PRI_ANY);
 
+	if (hn_xpnt_vf) {
+		sc->hn_ifnet_lnkhand = EVENTHANDLER_REGISTER(ifnet_link_event,
+		    hn_ifnet_lnkevent, sc, EVENTHANDLER_PRI_ANY);
+	}
+
 	return (0);
 failed:
 	if (sc->hn_flags & HN_FLAG_SYNTH_ATTACHED)
@@ -1720,6 +1735,8 @@ hn_detach(device_t dev)
 		EVENTHANDLER_DEREGISTER(ifnet_departure_event,
 		    sc->hn_ifnet_dethand);
 	}
+	if (sc->hn_ifnet_lnkhand != NULL)
+		EVENTHANDLER_DEREGISTER(ifnet_link_event, sc->hn_ifnet_lnkhand);
 
 	vf_ifp = sc->hn_vf_ifp;
 	__compiler_membar();

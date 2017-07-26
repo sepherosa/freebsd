@@ -244,6 +244,7 @@ struct hn_softc {
 	eventhandler_tag	hn_ifnet_evthand;
 	eventhandler_tag	hn_ifnet_atthand;
 	eventhandler_tag	hn_ifnet_dethand;
+	eventhandler_tag	hn_ifnet_lnkhand;
 
 	/*
 	 * Saved information for VF under transparent mode.
