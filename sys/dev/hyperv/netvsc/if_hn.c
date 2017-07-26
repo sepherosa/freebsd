@@ -1678,6 +1678,14 @@ hn_attach(device_t dev)
 	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "hwassist",
 	    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, sc, 0,
 	    hn_hwassist_sysctl, "A", "hwassist");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "tso_max",
+	    CTLFLAG_RD, &ifp->if_hw_tsomax, 0, "max TSO size");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "tso_maxsegcnt",
+	    CTLFLAG_RD, &ifp->if_hw_tsomaxsegcount, 0,
+	    "max # of TSO segments");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "tso_maxsegsz",
+	    CTLFLAG_RD, &ifp->if_hw_tsomaxsegsize, 0,
+	    "max size of TSO segment");
 	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "rxfilter",
 	    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, sc, 0,
 	    hn_rxfilter_sysctl, "A", "rxfilter");
