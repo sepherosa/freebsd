@@ -1667,7 +1667,7 @@ hn_attach(device_t dev)
 		ifp->if_qflush = hn_xmit_qflush;
 	}
 
-	ifp->if_capabilities |= IFCAP_RXCSUM | IFCAP_LRO;
+	ifp->if_capabilities |= IFCAP_RXCSUM | IFCAP_LRO | IFCAP_LINKSTATE;
 #ifdef foo
 	/* We can't diff IPv6 packets from IPv4 packets on RX path. */
 	ifp->if_capabilities |= IFCAP_RXCSUM_IPV6;
