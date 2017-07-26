@@ -3083,7 +3083,7 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			break;
 		}
 
-		if (hn_xpnt_vf && sc->hn_vf_ifp != NULL)
+		if (hn_xpnt_vf_isready(sc))
 			hn_xpnt_vf_saveifflags(sc);
 
 		if (ifp->if_flags & IFF_UP) {
@@ -3179,7 +3179,7 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 
 		/* XXX vlan(4) style mcast addr maintenance */
-		if (hn_xpnt_vf && sc->hn_vf_ifp != NULL) {
+		if (hn_xpnt_vf_isready(sc)) {
 			int old_if_flags;
 
 			old_if_flags = sc->hn_vf_ifp->if_flags;
