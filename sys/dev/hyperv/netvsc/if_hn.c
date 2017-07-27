@@ -1176,6 +1176,12 @@ hn_xpnt_vf_iocsetcaps(struct hn_softc *sc, struct ifreq *ifr)
 	error = vf_ifp->if_ioctl(vf_ifp, SIOCSIFCAP, (caddr_t)ifr);
 
 	/*
+	 * NOTE:
+	 * The error will be propagated to the callers, however, it
+	 * is _not_ useful here.
+	 */
+
+	/*
 	 * Merge VF's enabled capabilities.
 	 */
 	ifp->if_capenable = vf_ifp->if_capenable & ifp->if_capabilities;
