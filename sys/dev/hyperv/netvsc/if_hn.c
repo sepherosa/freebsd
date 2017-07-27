@@ -275,6 +275,8 @@ static void			hn_rxvf_set(struct hn_softc *, struct ifnet *);
 static void			hn_rxvf_set_task(void *, int);
 static void			hn_xpnt_vf_input(struct ifnet *, struct mbuf *);
 static int			hn_xpnt_vf_iocsetflags(struct hn_softc *);
+static int			hn_xpnt_vf_iocsetcaps(struct hn_softc *,
+				    struct ifreq *);
 static void			hn_xpnt_vf_saveifflags(struct hn_softc *);
 static bool			hn_xpnt_vf_isready(struct hn_softc *);
 static void			hn_xpnt_vf_setready(struct hn_softc *);
@@ -1155,6 +1157,57 @@ hn_ifaddr_event(void *arg, struct ifnet *ifp)
 }
 
 static int
+hn_xpnt_vf_iocsetcaps(struct hn_softc *sc, struct ifreq *ifr)
+{
+	struct ifnet *ifp, *vf_ifp;
+	uint64_t tmp;
+	int error;
+
+	HN_LOCK_ASSERT(sc);
+	ifp = sc->hn_ifp;
+	vf_ifp = sc->hn_vf_ifp;
+
+	/*
+	 * Fix up requested capabilities w/ supported capabilities,
+	 * since the supported capabilities could have been changed.
+	 */
+	ifr->ifr_reqcap &= ifp->if_capabilities;
+	/* Pass SIOCSIFCAP to VF. */
+	error = vf_ifp->if_ioctl(vf_ifp, SIOCSIFCAP, (caddr_t)ifr);
+
+	/*
+	 * Merge VF's enabled capabilities.
+	 */
+	ifp->if_capenable = vf_ifp->if_capenable & ifp->if_capabilities;
+
+	tmp = vf_ifp->if_hwassist & HN_CSUM_IP_HWASSIST(sc);
+	if (ifp->if_capenable & IFCAP_TXCSUM)
+		ifp->if_hwassist |= tmp;
+	else
+		ifp->if_hwassist &= ~tmp;
+
+	tmp = vf_ifp->if_hwassist & HN_CSUM_IP6_HWASSIST(sc);
+	if (ifp->if_capenable & IFCAP_TXCSUM_IPV6)
+		ifp->if_hwassist |= tmp;
+	else
+		ifp->if_hwassist &= ~tmp;
+
+	tmp = vf_ifp->if_hwassist & CSUM_IP_TSO;
+	if (ifp->if_capenable & IFCAP_TSO4)
+		ifp->if_hwassist |= tmp;
+	else
+		ifp->if_hwassist &= ~tmp;
+
+	tmp = vf_ifp->if_hwassist & CSUM_IP6_TSO;
+	if (ifp->if_capenable & IFCAP_TSO6)
+		ifp->if_hwassist |= tmp;
+	else
+		ifp->if_hwassist &= ~tmp;
+
+	return (error);
+}
+
+static int
 hn_xpnt_vf_iocsetflags(struct hn_softc *sc)
 {
 	struct ifnet *vf_ifp;
@@ -1225,11 +1278,52 @@ hn_xpnt_vf_input(struct ifnet *vf_ifp, struct mbuf *m)
 static void
 hn_xpnt_vf_setready(struct hn_softc *sc)
 {
+	struct ifnet *ifp, *vf_ifp;
+	struct ifreq ifr;
 
 	HN_LOCK_ASSERT(sc);
+	ifp = sc->hn_ifp;
+	vf_ifp = sc->hn_vf_ifp;
+
+	/*
+	 * Mark the VF ready.
+	 */
 	sc->hn_vf_rdytick = 0;
 
-	/* TODO */
+	/*
+	 * Save information for restoration.
+	 */
+	sc->hn_saved_caps = ifp->if_capabilities;
+	sc->hn_saved_tsomax = ifp->if_hw_tsomax;
+	sc->hn_saved_tsosegcnt = ifp->if_hw_tsomaxsegcount;
+	sc->hn_saved_tsosegsz = ifp->if_hw_tsomaxsegsize;
+
+	/*
+	 * Intersect supported/enabled capabilities.
+	 *
+	 * NOTE:
+	 * if_hwassist is not changed here.
+	 */
+	ifp->if_capabilities &= vf_ifp->if_capabilities;
+	ifp->if_capenable &= ifp->if_capabilities;
+
+	/*
+	 * Fix TSO settings.
+	 */
+	if (ifp->if_hw_tsomax > vf_ifp->if_hw_tsomax)
+		ifp->if_hw_tsomax = vf_ifp->if_hw_tsomax;
+	if (ifp->if_hw_tsomaxsegcount > vf_ifp->if_hw_tsomaxsegcount)
+		ifp->if_hw_tsomaxsegcount = vf_ifp->if_hw_tsomaxsegcount;
+	if (ifp->if_hw_tsomaxsegsize > vf_ifp->if_hw_tsomaxsegsize)
+		ifp->if_hw_tsomaxsegsize = vf_ifp->if_hw_tsomaxsegsize;
+
+	/*
+	 * Change VF's enabled capabilities.
+	 */
+	memset(&ifr, 0, sizeof(ifr));
+	strlcpy(ifr.ifr_name, vf_ifp->if_xname, sizeof(ifr.ifr_name));
+	ifr.ifr_reqcap = ifp->if_capenable;
+	hn_xpnt_vf_iocsetcaps(sc, &ifr);
 }
 
 static bool
@@ -1814,7 +1908,13 @@ hn_attach(device_t dev)
 	ifp->if_hwassist &= ~(HN_CSUM_IP6_MASK | CSUM_IP6_TSO);
 
 	if (ifp->if_capabilities & (IFCAP_TSO6 | IFCAP_TSO4)) {
+		/*
+		 * Lock hn_set_tso_maxsize() to simplify its
+		 * internal logic.
+		 */
+		HN_LOCK(sc);
 		hn_set_tso_maxsize(sc, hn_tso_maxlen, ETHERMTU);
+		HN_UNLOCK(sc);
 		ifp->if_hw_tsomaxsegcount = HN_TX_DATA_SEGCNT_MAX;
 		ifp->if_hw_tsomaxsegsize = PAGE_SIZE;
 	}
@@ -1840,6 +1940,9 @@ hn_attach(device_t dev)
 		    hn_ifnet_event, sc, EVENTHANDLER_PRI_ANY);
 		sc->hn_ifaddr_evthand = EVENTHANDLER_REGISTER(ifaddr_event,
 		    hn_ifaddr_event, sc, EVENTHANDLER_PRI_ANY);
+	} else {
+		sc->hn_ifnet_lnkhand = EVENTHANDLER_REGISTER(ifnet_link_event,
+		    hn_ifnet_lnkevent, sc, EVENTHANDLER_PRI_ANY);
 	}
 
 	/*
@@ -1852,11 +1955,6 @@ hn_attach(device_t dev)
 	    hn_ifnet_attevent, sc, EVENTHANDLER_PRI_ANY);
 	sc->hn_ifnet_dethand = EVENTHANDLER_REGISTER(ifnet_departure_event,
 	    hn_ifnet_detevent, sc, EVENTHANDLER_PRI_ANY);
-
-	if (hn_xpnt_vf) {
-		sc->hn_ifnet_lnkhand = EVENTHANDLER_REGISTER(ifnet_link_event,
-		    hn_ifnet_lnkevent, sc, EVENTHANDLER_PRI_ANY);
-	}
 
 	return (0);
 failed:
@@ -3123,7 +3221,18 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	case SIOCSIFCAP:
 		HN_LOCK(sc);
-		mask = ifr->ifr_reqcap ^ ifp->if_capenable;
+
+		if (hn_xpnt_vf_isready(sc)) {
+			error = hn_xpnt_vf_iocsetcaps(sc, ifr);
+			break;
+		}
+
+		/*
+		 * Fix up requested capabilities w/ supported capabilities,
+		 * since the supported capabilities could have been changed.
+		 */
+		mask = (ifr->ifr_reqcap & ifp->if_capabilities) ^
+		    ifp->if_capenable;
 
 		if (mask & IFCAP_TXCSUM) {
 			ifp->if_capenable ^= IFCAP_TXCSUM;
@@ -4685,7 +4794,10 @@ static void
 hn_set_tso_maxsize(struct hn_softc *sc, int tso_maxlen, int mtu)
 {
 	struct ifnet *ifp = sc->hn_ifp;
+	u_int hw_tsomax;
 	int tso_minlen;
+
+	HN_LOCK_ASSERT(sc);
 
 	if ((ifp->if_capabilities & (IFCAP_TSO4 | IFCAP_TSO6)) == 0)
 		return;
@@ -4704,7 +4816,13 @@ hn_set_tso_maxsize(struct hn_softc *sc, int tso_maxlen, int mtu)
 		tso_maxlen = IP_MAXPACKET;
 	if (tso_maxlen > sc->hn_ndis_tso_szmax)
 		tso_maxlen = sc->hn_ndis_tso_szmax;
-	ifp->if_hw_tsomax = tso_maxlen - (ETHER_HDR_LEN + ETHER_VLAN_ENCAP_LEN);
+	hw_tsomax = tso_maxlen - (ETHER_HDR_LEN + ETHER_VLAN_ENCAP_LEN);
+
+	if (hn_xpnt_vf_isready(sc)) {
+		if (hw_tsomax > sc->hn_vf_ifp->if_hw_tsomax)
+			hw_tsomax = sc->hn_vf_ifp->if_hw_tsomax;
+	}
+	ifp->if_hw_tsomax = hw_tsomax;
 	if (bootverbose)
 		if_printf(ifp, "TSO size max %u\n", ifp->if_hw_tsomax);
 }

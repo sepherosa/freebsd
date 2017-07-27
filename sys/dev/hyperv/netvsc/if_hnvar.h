@@ -247,13 +247,21 @@ struct hn_softc {
 	eventhandler_tag	hn_ifnet_lnkhand;
 
 	/*
+	 * Transparent VF delayed initialization.
+	 */
+	int			hn_vf_rdytick;	/* ticks, 0 == ready */
+	struct taskqueue	*hn_vf_taskq;
+	struct timeout_task	hn_vf_init;
+
+	/*
 	 * Saved information for VF under transparent mode.
 	 */
 	void			(*hn_vf_input)
 				(struct ifnet *, struct mbuf *);
-	int			hn_vf_rdytick;	/* ticks, 0 == ready */
-	struct taskqueue	*hn_vf_taskq;
-	struct timeout_task	hn_vf_init;
+	int			hn_saved_caps;
+	u_int			hn_saved_tsomax;
+	u_int			hn_saved_tsosegcnt;
+	u_int			hn_saved_tsosegsz;
 };
 
 #define HN_FLAG_RXBUF_CONNECTED		0x0001
