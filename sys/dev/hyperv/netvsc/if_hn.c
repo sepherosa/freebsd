@@ -3224,6 +3224,7 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 		if (hn_xpnt_vf_isready(sc)) {
 			error = hn_xpnt_vf_iocsetcaps(sc, ifr);
+			HN_UNLOCK(sc);
 			break;
 		}
 
