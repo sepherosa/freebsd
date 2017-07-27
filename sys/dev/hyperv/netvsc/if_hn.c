@@ -1255,6 +1255,9 @@ hn_xpnt_vf_input(struct ifnet *vf_ifp, struct mbuf *m)
 	rm_runlock(&hn_vfmap_lock, &pt);
 
 	if (hn_ifp != NULL) {
+		/* Allow tapping on the VF. */
+		ETHER_BPF_MTAP(vf_ifp, m);
+
 		/*
 		 * Fix up rcvif and go through hn(4)'s if_input.
 		 */
