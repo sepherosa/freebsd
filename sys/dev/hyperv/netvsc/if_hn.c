@@ -1969,6 +1969,14 @@ hn_detach(device_t dev)
 	struct hn_softc *sc = device_get_softc(dev);
 	struct ifnet *ifp = sc->hn_ifp, *vf_ifp;
 
+	if (sc->hn_xact != NULL && vmbus_chan_is_revoked(sc->hn_prichan)) {
+		/*
+		 * In case that the vmbus missed the orphan handler
+		 * installation.
+		 */
+		vmbus_xact_ctx_orphan(sc->hn_xact);
+	}
+
 	if (sc->hn_ifaddr_evthand != NULL)
 		EVENTHANDLER_DEREGISTER(ifaddr_event, sc->hn_ifaddr_evthand);
 	if (sc->hn_ifnet_evthand != NULL)
@@ -1988,14 +1996,6 @@ hn_detach(device_t dev)
 	__compiler_membar();
 	if (vf_ifp != NULL)
 		hn_ifnet_detevent(sc, vf_ifp);
-
-	if (sc->hn_xact != NULL && vmbus_chan_is_revoked(sc->hn_prichan)) {
-		/*
-		 * In case that the vmbus missed the orphan handler
-		 * installation.
-		 */
-		vmbus_xact_ctx_orphan(sc->hn_xact);
-	}
 
 	if (device_is_attached(dev)) {
 		HN_LOCK(sc);
@@ -2026,6 +2026,8 @@ hn_detach(device_t dev)
 		free(sc->hn_tx_taskqs, M_DEVBUF);
 	}
 	taskqueue_free(sc->hn_mgmt_taskq0);
+	if (sc->hn_vf_taskq != NULL)
+		taskqueue_free(sc->hn_vf_taskq);
 
 	if (sc->hn_xact != NULL) {
 		/*
