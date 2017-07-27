@@ -1830,8 +1830,7 @@ hn_attach(device_t dev)
 		SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "rxvf",
 		    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, sc, 0,
 		    hn_rxvf_sysctl, "A", "activated Virtual Function's name");
-	}
-	if (hn_xpnt_vf) {
+	} else {
 		SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "vf_xpnt_enabled",
 		    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MPSAFE, sc, 0,
 		    hn_xpnt_vf_enabled_sysctl, "I",
