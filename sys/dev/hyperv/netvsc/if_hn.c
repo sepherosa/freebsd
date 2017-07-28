@@ -3192,11 +3192,9 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 		if (hn_xpnt_vf_isready(sc)) {
 			vf_ifp = sc->hn_vf_ifp;
-
 			ifr_vf = *ifr;
 			strlcpy(ifr_vf.ifr_name, vf_ifp->if_xname,
 			    sizeof(ifr_vf.ifr_name));
-
 			error = vf_ifp->if_ioctl(vf_ifp, SIOCSIFMTU,
 			    (caddr_t)&ifr_vf);
 			if (error) {
@@ -3304,7 +3302,10 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		HN_LOCK(sc);
 
 		if (hn_xpnt_vf_isready(sc)) {
-			error = hn_xpnt_vf_iocsetcaps(sc, ifr);
+			ifr_vf = *ifr;
+			strlcpy(ifr_vf.ifr_name, sc->hn_vf_ifp->if_xname,
+			    sizeof(ifr_vf.ifr_name));
+			error = hn_xpnt_vf_iocsetcaps(sc, &ifr_vf);
 			HN_UNLOCK(sc);
 			break;
 		}
@@ -3399,8 +3400,18 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCGIFMEDIA:
 		HN_LOCK(sc);
 		if (hn_xpnt_vf_isready(sc)) {
-			error = sc->hn_vf_ifp->if_ioctl(sc->hn_vf_ifp,
-			    cmd, data);
+			/*
+			 * SIOCGIFMEDIA expects ifmediareq, so don't
+			 * create and pass ifr_vf to the VF here; just
+			 * replace the ifr_name.
+			 */
+			vf_ifp = sc->hn_vf_ifp;
+			strlcpy(ifr->ifr_name, vf_ifp->if_xname,
+			    sizeof(ifr->ifr_name));
+			error = vf_ifp->if_ioctl(vf_ifp, cmd, data);
+			/* Restore the ifr_name. */
+			strlcpy(ifr->ifr_name, ifp->if_xname,
+			    sizeof(ifr->ifr_name));
 			HN_UNLOCK(sc);
 			break;
 		}
