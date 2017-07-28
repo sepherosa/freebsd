@@ -1263,12 +1263,14 @@ hn_xpnt_vf_input(struct ifnet *vf_ifp, struct mbuf *m)
 
 	if (hn_ifp != NULL) {
 		/*
-		 * Fix up rcvif and go through hn(4)'s if_input.
+		 * Fix up rcvif and go through hn(4)'s if_input and 
+		 * increase ipackets.
 		 */
 		for (mn = m; mn != NULL; mn = mn->m_nextpkt) {
 			/* Allow tapping on the VF. */
 			ETHER_BPF_MTAP(vf_ifp, mn);
 			mn->m_pkthdr.rcvif = hn_ifp;
+			if_inc_counter(hn_ifp, IFCOUNTER_IPACKETS, 1);
 		}
 		hn_ifp->if_input(hn_ifp, m);
 	} else {
@@ -5274,6 +5276,11 @@ hn_transmit(struct ifnet *ifp, struct mbuf *m)
 		rm_rlock(&sc->hn_vf_lock, &pt);
 		if (__predict_true(sc->hn_xvf_flags & HN_XVFFLAG_ENABLED)) {
 			struct mbuf *m_bpf = NULL;
+			int obytes, omcast;
+
+			obytes = m->m_pkthdr.len;
+			if (m->m_flags & M_MCAST)
+				omcast = 1;
 
 			if (sc->hn_xvf_flags & HN_XVFFLAG_ACCBPF) {
 				if (bpf_peers_present(ifp->if_bpf)) {
@@ -5297,6 +5304,19 @@ hn_transmit(struct ifnet *ifp, struct mbuf *m)
 				if (!error)
 					ETHER_BPF_MTAP(ifp, m_bpf);
 				m_freem(m_bpf);
+			}
+
+			if (error == ENOBUFS) {
+				if_inc_counter(ifp, IFCOUNTER_OQDROPS, 1);
+			} else if (error) {
+				if_inc_counter(ifp, IFCOUNTER_OERRORS, 1);
+			} else {
+				if_inc_counter(ifp, IFCOUNTER_OPACKETS, 1);
+				if_inc_counter(ifp, IFCOUNTER_OBYTES, obytes);
+				if (omcast) {
+					if_inc_counter(ifp, IFCOUNTER_OMCASTS,
+					    omcast);
+				}
 			}
 			return (error);
 		}
