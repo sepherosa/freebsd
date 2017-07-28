@@ -366,6 +366,7 @@ static void			hn_disable_rx(struct hn_softc *);
 static void			hn_drain_rxtx(struct hn_softc *, int);
 static void			hn_polling(struct hn_softc *, u_int);
 static void			hn_chan_polling(struct vmbus_channel *, u_int);
+static void			hn_mtu_change_fixup(struct hn_softc *);
 
 static void			hn_update_link_status(struct hn_softc *);
 static void			hn_change_network(struct hn_softc *);
@@ -1285,6 +1286,21 @@ hn_xpnt_vf_input(struct ifnet *vf_ifp, struct mbuf *m)
 }
 
 static void
+hn_mtu_change_fixup(struct hn_softc *sc)
+{
+	struct ifnet *ifp;
+
+	HN_LOCK_ASSERT(sc);
+	ifp = sc->hn_ifp;
+
+	hn_set_tso_maxsize(sc, hn_tso_maxlen, ifp->if_mtu);
+#if __FreeBSD_version >= 1100099
+	if (sc->hn_rx_ring[0].hn_lro.lro_length_lim < HN_LRO_LENLIM_MIN(ifp))
+		hn_set_lro_lenlim(sc, HN_LRO_LENLIM_MIN(ifp));
+#endif
+}
+
+static void
 hn_xpnt_vf_setready(struct hn_softc *sc)
 {
 	struct ifnet *ifp, *vf_ifp;
@@ -1333,6 +1349,34 @@ hn_xpnt_vf_setready(struct hn_softc *sc)
 	strlcpy(ifr.ifr_name, vf_ifp->if_xname, sizeof(ifr.ifr_name));
 	ifr.ifr_reqcap = ifp->if_capenable;
 	hn_xpnt_vf_iocsetcaps(sc, &ifr);
+
+	if (ifp->if_mtu != ETHERMTU) {
+		int error;
+
+		/*
+		 * Change VF's MTU.
+		 */
+		memset(&ifr, 0, sizeof(ifr));
+		strlcpy(ifr.ifr_name, vf_ifp->if_xname, sizeof(ifr.ifr_name));
+		ifr.ifr_mtu = ifp->if_mtu;
+		error = vf_ifp->if_ioctl(vf_ifp, SIOCSIFMTU, (caddr_t)&ifr);
+		if (error) {
+			if_printf(ifp, "%s SIOCSIFMTU %u failed\n",
+			    vf_ifp->if_xname, ifp->if_mtu);
+			if (ifp->if_mtu > ETHERMTU) {
+				if_printf(ifp, "change MTU to %d\n", ETHERMTU);
+
+				/*
+				 * XXX
+				 * No need to adjust the synthetic parts' MTU;
+				 * failure of the adjustment will cause us
+				 * infinite headache.
+				 */
+				ifp->if_mtu = ETHERMTU;
+				hn_mtu_change_fixup(sc);
+			}
+		}
+	}
 }
 
 static bool
@@ -3116,7 +3160,8 @@ static int
 hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct hn_softc *sc = ifp->if_softc;
-	struct ifreq *ifr = (struct ifreq *)data;
+	struct ifreq *ifr = (struct ifreq *)data, ifr_vf;
+	struct ifnet *vf_ifp;
 	int mask, error = 0;
 
 	switch (cmd) {
@@ -3143,6 +3188,23 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if (ifp->if_mtu == ifr->ifr_mtu) {
 			HN_UNLOCK(sc);
 			break;
+		}
+
+		if (hn_xpnt_vf_isready(sc)) {
+			vf_ifp = sc->hn_vf_ifp;
+
+			ifr_vf = *ifr;
+			strlcpy(ifr_vf.ifr_name, vf_ifp->if_xname,
+			    sizeof(ifr_vf.ifr_name));
+
+			error = vf_ifp->if_ioctl(vf_ifp, SIOCSIFMTU,
+			    (caddr_t)&ifr_vf);
+			if (error) {
+				HN_UNLOCK(sc);
+				if_printf(ifp, "%s SIOCSIFMTU %d failed: %d\n",
+				    vf_ifp->if_xname, ifr->ifr_mtu, error);
+				break;
+			}
 		}
 
 		/*
@@ -3173,22 +3235,31 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		ifp->if_mtu = ifr->ifr_mtu;
 
 		/*
-		 * Make sure that various parameters based on MTU are
-		 * still valid, after the MTU change.
+		 * Synthetic parts' reattach may change the chimney
+		 * sending size; update it.
 		 */
 		if (sc->hn_tx_ring[0].hn_chim_size > sc->hn_chim_szmax)
 			hn_set_chim_size(sc, sc->hn_chim_szmax);
-		hn_set_tso_maxsize(sc, hn_tso_maxlen, ifp->if_mtu);
-#if __FreeBSD_version >= 1100099
-		if (sc->hn_rx_ring[0].hn_lro.lro_length_lim <
-		    HN_LRO_LENLIM_MIN(ifp))
-			hn_set_lro_lenlim(sc, HN_LRO_LENLIM_MIN(ifp));
-#endif
+
+		/*
+		 * Make sure that various parameters based on MTU are
+		 * still valid, after the MTU change.
+		 */
+		hn_mtu_change_fixup(sc);
 
 		/*
 		 * All done!  Resume the interface now.
 		 */
 		hn_resume(sc);
+
+		if (sc->hn_xvf_flags & HN_XVFFLAG_ENABLED) {
+			/*
+			 * Since we have reattached the NVS part,
+			 * change the datapath to VF again; in case
+			 * that it is lost, after the NVS was detached.
+			 */
+			hn_nvs_set_datapath(sc, HN_NVS_DATAPATH_VF);
+		}
 
 		HN_UNLOCK(sc);
 		break;
