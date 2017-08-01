@@ -1572,19 +1572,60 @@ hn_ifnet_detevent(void *xsc, struct ifnet *ifp)
 	if (!hn_ismyvf(sc, ifp))
 		goto done;
 
-	/* NOTE: hn_vf_lock for hn_transmit()/hn_qflush() */
-	rm_wlock(&sc->hn_vf_lock);
-	/* TODO: (hn_xvf_flags & HN_XVFFLAG_ENABLED) */
-	sc->hn_vf_ifp = NULL;
-	rm_wunlock(&sc->hn_vf_lock);
-
 	if (hn_xpnt_vf) {
+		/*
+		 * Make sure that the delayed initialization is not running.
+		 *
+		 * NOTE:
+		 * - This lock _must_ be released, since the hn_vf_init task
+		 *   will try holding this lock.
+		 * - It is safe to release this lock here, since the
+		 *   hn_ifnet_attevent() is interlocked by the hn_vf_ifp.
+		 *
+		 * XXX racy, if hn(4) ever detached.
+		 */
+		HN_UNLOCK(sc);
+		taskqueue_drain_timeout(sc->hn_vf_taskq, &sc->hn_vf_init);
+		HN_LOCK(sc);
+
 		KASSERT(sc->hn_vf_input != NULL, ("%s VF input is not saved",
 		    sc->hn_ifp->if_xname));
 		ifp->if_input = sc->hn_vf_input;
 		sc->hn_vf_input = NULL;
+
+		if (sc->hn_xvf_flags & HN_XVFFLAG_ENABLED)
+			hn_nvs_set_datapath(sc, HN_NVS_DATAPATH_SYNTH);
+
+		if (sc->hn_vf_rdytick == 0) {
+			/*
+			 * The VF was ready; restore some settings.
+			 */
+			ifp->if_capabilities = sc->hn_saved_caps;
+			/*
+			 * NOTE:
+			 * There is _no_ need to fixup if_capenable and
+			 * if_hwassist, since the if_capabilities before
+			 * restoration was an intersection of the VF's
+			 * if_capabilites and the synthetic device's
+			 * if_capabilites.
+			 */
+			ifp->if_hw_tsomax = sc->hn_saved_tsomax;
+			ifp->if_hw_tsomaxsegcount = sc->hn_saved_tsosegcnt;
+			ifp->if_hw_tsomaxsegsize = sc->hn_saved_tsosegsz;
+		}
+
+		/*
+		 * Resume link status management, which was suspended
+		 * by hn_ifnet_attevent().
+		 */
 		hn_resume_mgmt(sc);
 	}
+
+	/* NOTE: hn_vf_lock for hn_transmit()/hn_qflush() */
+	rm_wlock(&sc->hn_vf_lock);
+	sc->hn_xvf_flags &= ~HN_XVFFLAG_ENABLED;
+	sc->hn_vf_ifp = NULL;
+	rm_wunlock(&sc->hn_vf_lock);
 
 	rm_wlock(&hn_vfmap_lock);
 
