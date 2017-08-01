@@ -838,8 +838,7 @@ hn_rxfilter_config(struct hn_softc *sc)
 
 	HN_LOCK_ASSERT(sc);
 
-	if ((ifp->if_flags & IFF_PROMISC) || (sc->hn_flags & HN_FLAG_RXVF) ||
-	    (sc->hn_xvf_flags & HN_XVFFLAG_ENABLED)) {
+	if ((ifp->if_flags & IFF_PROMISC) || (sc->hn_flags & HN_FLAG_RXVF)) {
 		filter = NDIS_PACKET_TYPE_PROMISCUOUS;
 	} else {
 		filter = NDIS_PACKET_TYPE_DIRECTED;
@@ -1438,11 +1437,6 @@ hn_xpnt_vf_init(struct hn_softc *sc)
 	rm_wlock(&sc->hn_vf_lock);
 	sc->hn_xvf_flags |= HN_XVFFLAG_ENABLED;
 	rm_wunlock(&sc->hn_vf_lock);
-
-	/*
-	 * Re-configure RX filter, after setting HN_XVFFLAG_ENABLED.
-	 */
-	hn_rxfilter_config(sc);
 }
 
 static void
