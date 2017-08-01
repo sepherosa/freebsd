@@ -1600,7 +1600,7 @@ hn_ifnet_detevent(void *xsc, struct ifnet *ifp)
 			/*
 			 * The VF was ready; restore some settings.
 			 */
-			ifp->if_capabilities = sc->hn_saved_caps;
+			sc->hn_ifp->if_capabilities = sc->hn_saved_caps;
 			/*
 			 * NOTE:
 			 * There is _no_ need to fixup if_capenable and
@@ -1609,9 +1609,10 @@ hn_ifnet_detevent(void *xsc, struct ifnet *ifp)
 			 * if_capabilites and the synthetic device's
 			 * if_capabilites.
 			 */
-			ifp->if_hw_tsomax = sc->hn_saved_tsomax;
-			ifp->if_hw_tsomaxsegcount = sc->hn_saved_tsosegcnt;
-			ifp->if_hw_tsomaxsegsize = sc->hn_saved_tsosegsz;
+			sc->hn_ifp->if_hw_tsomax = sc->hn_saved_tsomax;
+			sc->hn_ifp->if_hw_tsomaxsegcount =
+			    sc->hn_saved_tsosegcnt;
+			sc->hn_ifp->if_hw_tsomaxsegsize = sc->hn_saved_tsosegsz;
 		}
 
 		/*
