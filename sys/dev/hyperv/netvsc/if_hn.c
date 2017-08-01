@@ -838,6 +838,11 @@ hn_rxfilter_config(struct hn_softc *sc)
 
 	HN_LOCK_ASSERT(sc);
 
+	/*
+	 * If the non-transparent mode VF is activated, we don't know how
+	 * its RX filter is configured, so stick the synthetic device in
+	 * the promiscous mode.
+	 */
 	if ((ifp->if_flags & IFF_PROMISC) || (sc->hn_flags & HN_FLAG_RXVF)) {
 		filter = NDIS_PACKET_TYPE_PROMISCUOUS;
 	} else {
@@ -6168,6 +6173,11 @@ hn_suspend(struct hn_softc *sc)
 	/* Disable polling. */
 	hn_polling(sc, 0);
 
+	/*
+	 * If the non-transparent mode VF is activated, the synthetic
+	 * device is receiving packets, so the data path of the
+	 * synthetic device must be suspended.
+	 */
 	if ((sc->hn_ifp->if_drv_flags & IFF_DRV_RUNNING) ||
 	    (sc->hn_flags & HN_FLAG_RXVF))
 		hn_suspend_data(sc);
@@ -6258,15 +6268,21 @@ static void
 hn_resume(struct hn_softc *sc)
 {
 
+	/*
+	 * If the non-transparent mode VF is activated, the synthetic
+	 * device have to receive packets, so the data path of the
+	 * synthetic device must be resumed.
+	 */
 	if ((sc->hn_ifp->if_drv_flags & IFF_DRV_RUNNING) ||
 	    (sc->hn_flags & HN_FLAG_RXVF))
 		hn_resume_data(sc);
 
 	/*
-	 * When the VF is activated, the synthetic interface is changed
-	 * to DOWN in hn_rxvf_change().  Here, if the VF is still active,
-	 * we don't call hn_resume_mgmt() until the VF is deactivated in
-	 * hn_rxvf_change().
+	 * Don't resume link status change if VF is attached/activated.
+	 * - In the non-transparent VF mode, the synthetic device marks
+	 *   link down until the VF is deactivated; i.e. VF is down.
+	 * - In transparent VF mode, VF's media status is used until
+	 *   the VF is detached.
 	 */
 	if ((sc->hn_flags & HN_FLAG_RXVF) == 0 &&
 	    !(hn_xpnt_vf && sc->hn_vf_ifp != NULL))
