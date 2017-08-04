@@ -584,7 +584,16 @@ int mlx4_en_DUMP_ETH_STATS(struct mlx4_en_dev *mdev, u8 port, u8 reset)
 		vport_stats->tx_errors = tmp_vport_stats.tx_errors;
 	}
 
-	if (!mlx4_is_mfunc(mdev->dev)) {
+#if 0
+	if (!mlx4_is_mfunc(mdev->dev))
+#endif
+	{
+		static int logged;
+
+		if (!logged) {
+			printf("mlxen: flags %lx\n", mdev->dev->flags);
+			logged = 1;
+		}
 /* netdevice stats format */
 #if __FreeBSD_version >= 1100000
 		if (reset == 0) {
