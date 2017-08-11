@@ -3189,19 +3189,19 @@ skip:
 	 *
 	 * - Don't setup mbuf hash, if 'options RSS' is set.
 	 *
-	 *   In Azure, when VF is activated, TCP SYN goes through hn(4)
-	 *   while the rest of segments and ACKs belonging to the same
-	 *   TCP 4-tuple go through the VF.  So don't setup mbuf hash,
-	 *   if a VF is activated and 'options RSS' is not enabled.
-	 *   hn(4) and the VF may use neither the same RSS hash key nor
-	 *   the same RSS hash function, so the hash value for packets
-	 *   belonging to the same flow could be different!
+	 *   In Azure, when VF is activated, TCP SYN and SYN|ACK goes
+	 *   through hn(4) while the rest of segments and ACKs belonging
+	 *   to the same TCP 4-tuple go through the VF.  So don't setup
+	 *   mbuf hash, if a VF is activated and 'options RSS' is not
+	 *   enabled.  hn(4) and the VF may use neither the same RSS
+	 *   hash key nor the same RSS hash function, so the hash value
+	 *   for packets belonging to the same flow could be different!
 	 *
 	 * - Disable LRO
 	 *
 	 *   hn(4) will only receive broadcast packets, multicast
-	 *   packet and TCP SYN (in Azure), LRO is useless for these
-	 *   packet types.
+	 *   packet and TCP SYN and SYN|ACK (in Azure), LRO is useless
+	 *   for these packet types.
 	 *
 	 *   For non-transparent, we definitely _cannot_ enable LRO at
 	 *   all, since the LRO flush will use hn(4) as the receiving
