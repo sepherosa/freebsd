@@ -3316,12 +3316,8 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct ifreq *ifr = (struct ifreq *)data, ifr_vf;
 	struct ifnet *vf_ifp;
 	int mask, error = 0;
-#ifdef SIOCGIFRSSKEY
 	struct ifrsskey *ifrk;
-#endif
-#ifdef SIOCGIFRSSHASH
 	struct ifrsshash *ifrh;
-#endif
 
 	switch (cmd) {
 	case SIOCSIFMTU:
@@ -3579,7 +3575,6 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->hn_media, cmd);
 		break;
 
-#ifdef SIOCGIFRSSHASH
 	case SIOCGIFRSSHASH:
 		ifrh = (struct ifrsshash *)data;
 		HN_LOCK(sc);
@@ -3610,9 +3605,7 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			ifrh->ifrh_types |= RSS_TYPE_TCP_IPV6_EX;
 		HN_UNLOCK(sc);
 		break;
-#endif	/* SIOCGIFRSSHASH */
 
-#ifdef SIOCGIFRSSKEY
 	case SIOCGIFRSSKEY:
 		ifrk = (struct ifrsskey *)data;
 		HN_LOCK(sc);
@@ -3631,7 +3624,6 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		    NDIS_HASH_KEYSIZE_TOEPLITZ);
 		HN_UNLOCK(sc);
 		break;
-#endif	/* SIOCGIFRSSKEY */
 
 	default:
 		error = ether_ioctl(ifp, cmd, data);
