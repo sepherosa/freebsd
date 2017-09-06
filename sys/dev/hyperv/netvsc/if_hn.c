@@ -284,6 +284,7 @@ static void			hn_xpnt_vf_init_taskfunc(void *, int);
 static void			hn_xpnt_vf_init(struct hn_softc *);
 static void			hn_xpnt_vf_setenable(struct hn_softc *);
 static void			hn_xpnt_vf_setdisable(struct hn_softc *, bool);
+static void			hn_vf_rss_fixup(struct hn_softc *);
 
 static int			hn_rndis_rxinfo(const void *, int,
 				    struct hn_rxinfo *);
@@ -1336,6 +1337,155 @@ hn_mtu_change_fixup(struct hn_softc *sc)
 #endif
 }
 
+static uint32_t
+hn_rss_type_fromndis(uint32_t rss_hash)
+{
+	uint32_t types = 0;
+
+	if (rss_hash & NDIS_HASH_IPV4)
+		types |= RSS_TYPE_IPV4;
+	if (rss_hash & NDIS_HASH_TCP_IPV4)
+		types |= RSS_TYPE_TCP_IPV4;
+	if (rss_hash & NDIS_HASH_IPV6)
+		types |= RSS_TYPE_IPV6;
+	if (rss_hash & NDIS_HASH_IPV6_EX)
+		types |= RSS_TYPE_IPV6_EX;
+	if (rss_hash & NDIS_HASH_TCP_IPV6)
+		types |= RSS_TYPE_TCP_IPV6;
+	if (rss_hash & NDIS_HASH_TCP_IPV6_EX)
+		types |= RSS_TYPE_TCP_IPV6_EX;
+	return (types);
+}
+
+static void
+hn_vf_rss_fixup(struct hn_softc *sc)
+{
+	struct ifnet *ifp, *vf_ifp;
+	struct ifrsshash ifrh;
+	struct ifrsskey ifrk;
+	int error;
+	uint32_t my_types, type_diffs;
+
+	HN_LOCK_ASSERT(sc);
+	KASSERT(sc->hn_flags & HN_FLAG_SYNTH_ATTACHED,
+	    ("%s: synthetic parts are not attached", sc->hn_ifp->if_xname));
+
+	if (sc->hn_rx_ring_inuse == 1) {
+		/* No RSS on synthetic parts; done. */
+		return;
+	}
+	if ((sc->hn_rss_hcap & NDIS_HASH_FUNCTION_TOEPLITZ) == 0) {
+		/* Synthetic parts do not support Toeplitz; done. */
+		return;
+	}
+
+	ifp = sc->hn_ifp;
+	vf_ifp = sc->hn_vf_ifp;
+
+	/*
+	 * Extract VF's RSS key.  Only 40 bytes key for Toeplitz is
+	 * supported.
+	 */
+	memset(&ifrk, 0, sizeof(ifrk));
+	strlcpy(ifrk.ifrk_name, vf_ifp->if_xname, sizeof(ifrk.ifrk_name));
+	error = vf_ifp->if_ioctl(vf_ifp, SIOCGIFRSSKEY, (caddr_t)&ifrk);
+	if (error) {
+		if_printf(ifp, "%s SIOCGRSSKEY failed: %d\n",
+		    vf_ifp->if_xname, error);
+		goto failed;
+	}
+	if (ifrk.ifrk_func != RSS_FUNC_TOEPLITZ) {
+		if_printf(ifp, "%s RSS function %u is not Toeplitz\n",
+		    vf_ifp->if_xname, ifrk.ifrk_func);
+		goto failed;
+	}
+	if (ifrk.ifrk_keylen != NDIS_HASH_KEYSIZE_TOEPLITZ) {
+		if_printf(ifp, "%s invalid RSS Toeplitz key length %d\n",
+		    vf_ifp->if_xname, ifrk.ifrk_keylen);
+		goto failed;
+	}
+
+	/*
+	 * Extract VF's RSS hash.  Only Toeplitz is supported.
+	 */
+	memset(&ifrh, 0, sizeof(ifrh));
+	strlcpy(ifrh.ifrh_name, vf_ifp->if_xname, sizeof(ifrh.ifrh_name));
+	error = vf_ifp->if_ioctl(vf_ifp, SIOCGIFRSSHASH, (caddr_t)&ifrh);
+	if (error) {
+		if_printf(ifp, "%s SIOCGRSSHASH failed: %d\n",
+		    vf_ifp->if_xname, error);
+		goto failed;
+	}
+	if (ifrh.ifrh_func != RSS_FUNC_TOEPLITZ) {
+		if_printf(ifp, "%s RSS function %u is not Toeplitz\n",
+		    vf_ifp->if_xname, ifrh.ifrh_func);
+		goto failed;
+	}
+
+	my_types = hn_rss_type_fromndis(sc->hn_rss_hcap);
+	if ((ifrh.ifrh_types & my_types) == 0) {
+		/* This disables RSS; ignore it then */
+		if_printf(ifp, "%s intersection of RSS types failed.  "
+		    "VF %#x, mine %#x\n", vf_ifp->if_xname,
+		    ifrh.ifrh_types, my_types);
+		goto failed;
+	}
+
+	type_diffs = my_types ^ ifrh.ifrh_types;
+	my_types &= ifrh.ifrh_types;
+
+	if ((my_types & RSS_TYPE_IPV4) &&
+	    (type_diffs & ifrh.ifrh_types &
+	     (RSS_TYPE_TCP_IPV4 | RSS_TYPE_UDP_IPV4))) {
+		/* Conflict; disable IPV4 hash type/value delivery. */
+		if_printf(ifp, "disable IPV4 mbuf hash delivery\n");
+	}
+	if ((my_types & RSS_TYPE_IPV6) &&
+	    (type_diffs & ifrh.ifrh_types &
+	     (RSS_TYPE_TCP_IPV6 | RSS_TYPE_UDP_IPV6 |
+	      RSS_TYPE_TCP_IPV6_EX | RSS_TYPE_UDP_IPV6_EX |
+	      RSS_TYPE_IPV6_EX))) {
+		/* Conflict; disable IPV6 hash type/value delivery. */
+		if_printf(ifp, "disable IPV6 mbuf hash delivery\n");
+	}
+	if ((my_types & RSS_TYPE_IPV6_EX) &&
+	    (type_diffs & ifrh.ifrh_types &
+	     (RSS_TYPE_TCP_IPV6 | RSS_TYPE_UDP_IPV6 |
+	      RSS_TYPE_TCP_IPV6_EX | RSS_TYPE_UDP_IPV6_EX |
+	      RSS_TYPE_IPV6))) {
+		/* Conflict; disable IPV6_EX hash type/value delivery. */
+		if_printf(ifp, "disable IPV6_EX mbuf hash delivery\n");
+	}
+	if ((my_types & RSS_TYPE_TCP_IPV6) &&
+	    (type_diffs & ifrh.ifrh_types & RSS_TYPE_TCP_IPV6_EX)) {
+		/* Conflict; disable TCP_IPV6 hash type/value delivery. */
+		if_printf(ifp, "disable TCP_IPV6 mbuf hash delivery\n");
+	}
+	if ((my_types & RSS_TYPE_TCP_IPV6_EX) &&
+	    (type_diffs & ifrh.ifrh_types & RSS_TYPE_TCP_IPV6)) {
+		/* Conflict; disable TCP_IPV6_EX hash type/value delivery. */
+		if_printf(ifp, "disable TCP_IPV6_EX mbuf hash delivery\n");
+	}
+	if ((my_types & RSS_TYPE_UDP_IPV6) &&
+	    (type_diffs & ifrh.ifrh_types & RSS_TYPE_UDP_IPV6_EX)) {
+		/* Conflict; disable UDP_IPV6 hash type/value delivery. */
+		if_printf(ifp, "disable UDP_IPV6 mbuf hash delivery\n");
+	}
+	if ((my_types & RSS_TYPE_UDP_IPV6_EX) &&
+	    (type_diffs & ifrh.ifrh_types & RSS_TYPE_UDP_IPV6)) {
+		/* Conflict; disable UDP_IPV6_EX hash type/value delivery. */
+		if_printf(ifp, "disable UDP_IPV6_EX mbuf hash delivery\n");
+	}
+
+	/* TODO: hn_rss_reconfig */
+	/* TODO: enable mbuf hash type/value setup. */
+
+	return;
+failed:
+	/* TODO disable all mbuf hash type/value setup. */
+	return;
+}
+
 static void
 hn_xpnt_vf_setready(struct hn_softc *sc)
 {
@@ -1501,6 +1651,9 @@ hn_xpnt_vf_init(struct hn_softc *sc)
 	 * Datapath setting must happen _after_ bringing the VF up.
 	 */
 	hn_nvs_set_datapath(sc, HN_NVS_DATAPATH_VF);
+
+	/* Fixup RSS related bits. */
+	hn_vf_rss_fixup(sc);
 
 	/* Mark transparent mode VF as enabled. */
 	hn_xpnt_vf_setenable(sc);
@@ -3593,20 +3746,7 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			ifrh->ifrh_func = RSS_FUNC_TOEPLITZ;
 		else
 			ifrh->ifrh_func = RSS_FUNC_PRIVATE;
-
-		ifrh->ifrh_types = 0;
-		if (sc->hn_rss_hash & NDIS_HASH_IPV4)
-			ifrh->ifrh_types |= RSS_TYPE_IPV4;
-		if (sc->hn_rss_hash & NDIS_HASH_TCP_IPV4)
-			ifrh->ifrh_types |= RSS_TYPE_TCP_IPV4;
-		if (sc->hn_rss_hash & NDIS_HASH_IPV6)
-			ifrh->ifrh_types |= RSS_TYPE_IPV6;
-		if (sc->hn_rss_hash & NDIS_HASH_IPV6_EX)
-			ifrh->ifrh_types |= RSS_TYPE_IPV6_EX;
-		if (sc->hn_rss_hash & NDIS_HASH_TCP_IPV6)
-			ifrh->ifrh_types |= RSS_TYPE_TCP_IPV6;
-		if (sc->hn_rss_hash & NDIS_HASH_TCP_IPV6_EX)
-			ifrh->ifrh_types |= RSS_TYPE_TCP_IPV6_EX;
+		ifrh->ifrh_types = hn_rss_type_fromndis(sc->hn_rss_hash);
 		HN_UNLOCK(sc);
 		break;
 
