@@ -1458,6 +1458,13 @@ hn_vf_rss_fixup(struct hn_softc *sc)
 	type_diffs = my_types ^ ifrh.ifrh_types;
 	my_types &= ifrh.ifrh_types;
 
+	/*
+	 * Detect RSS hash value/type confliction.
+	 *
+	 * NOTE:
+	 * We don't disable the hash type, but stop delivery the hash
+	 * value/type through mbufs on RX path.
+	 */
 	if ((my_types & RSS_TYPE_IPV4) &&
 	    (type_diffs & ifrh.ifrh_types &
 	     (RSS_TYPE_TCP_IPV4 | RSS_TYPE_UDP_IPV4))) {
@@ -1500,6 +1507,10 @@ hn_vf_rss_fixup(struct hn_softc *sc)
 		/* Conflict; disable UDP_IPV6_EX hash type/value delivery. */
 		if_printf(ifp, "disable UDP_IPV6_EX mbuf hash delivery\n");
 	}
+
+	/*
+	 * Indirect table does not matter.
+	 */
 
 	sc->hn_rss_hash = (sc->hn_rss_hcap & NDIS_HASH_FUNCTION_MASK) |
 	    hn_rss_type_tondis(my_types);
