@@ -1357,6 +1357,30 @@ hn_rss_type_fromndis(uint32_t rss_hash)
 	return (types);
 }
 
+static uint32_t
+hn_rss_type_tondis(uint32_t types)
+{
+	uint32_t rss_hash = 0;
+
+	KASSERT((types &
+	    (RSS_TYPE_UDP_IPV4 | RSS_TYPE_UDP_IPV6 | RSS_TYPE_IPV6_EX)) == 0,
+	    ("UDP4, UDP6 and UDP6EX are not supported"));
+
+	if (types & RSS_TYPE_IPV4)
+		rss_hash |= NDIS_HASH_IPV4;
+	if (types & RSS_TYPE_TCP_IPV4)
+		rss_hash |= NDIS_HASH_TCP_IPV4;
+	if (types & RSS_TYPE_IPV6)
+		rss_hash |= NDIS_HASH_IPV6;
+	if (types & RSS_TYPE_IPV6_EX)
+		rss_hash |= NDIS_HASH_IPV6_EX;
+	if (types & RSS_TYPE_TCP_IPV6)
+		rss_hash |= NDIS_HASH_TCP_IPV6;
+	if (types & RSS_TYPE_TCP_IPV6_EX)
+		rss_hash |= NDIS_HASH_TCP_IPV6_EX;
+	return (rss_hash);
+}
+
 static void
 hn_vf_rss_fixup(struct hn_softc *sc)
 {
@@ -1477,7 +1501,18 @@ hn_vf_rss_fixup(struct hn_softc *sc)
 		if_printf(ifp, "disable UDP_IPV6_EX mbuf hash delivery\n");
 	}
 
-	/* TODO: hn_rss_reconfig */
+	sc->hn_rss_hash = (sc->hn_rss_hcap & NDIS_HASH_FUNCTION_MASK) |
+	    hn_rss_type_tondis(my_types);
+	memcpy(sc->hn_rss.rss_key, ifrk.ifrk_key, sizeof(sc->hn_rss.rss_key));
+	sc->hn_flags |= HN_FLAG_HAS_RSSKEY;
+
+	error = hn_rss_reconfig(sc);
+	if (error) {
+		/* XXX roll-back? */
+		if_printf(ifp, "hn_rss_reconfig failed: %d\n", error);
+		return;
+	}
+
 	/* TODO: enable mbuf hash type/value setup. */
 
 	return;
