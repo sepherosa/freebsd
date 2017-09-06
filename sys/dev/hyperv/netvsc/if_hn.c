@@ -329,6 +329,7 @@ static int			hn_rss_ind_sysctl(SYSCTL_HANDLER_ARGS);
 #endif
 static int			hn_rss_hash_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_rss_hcap_sysctl(SYSCTL_HANDLER_ARGS);
+static int			hn_rss_mbuf_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_txagg_size_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_txagg_pkts_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_txagg_pktmax_sysctl(SYSCTL_HANDLER_ARGS);
@@ -388,8 +389,11 @@ static int			hn_rxfilter_config(struct hn_softc *);
 static int			hn_rss_reconfig(struct hn_softc *);
 #endif
 static void			hn_rss_ind_fixup(struct hn_softc *);
+static void			hn_rss_mbuf_hash(struct hn_softc *, uint32_t);
 static int			hn_rxpkt(struct hn_rx_ring *, const void *,
 				    int, const struct hn_rxinfo *);
+static uint32_t			hn_rss_type_fromndis(uint32_t);
+static uint32_t			hn_rss_type_tondis(uint32_t);
 
 static int			hn_tx_ring_create(struct hn_softc *, int);
 static void			hn_tx_ring_destroy(struct hn_tx_ring *);
@@ -1363,8 +1367,8 @@ hn_rss_type_tondis(uint32_t types)
 	uint32_t rss_hash = 0;
 
 	KASSERT((types &
-	    (RSS_TYPE_UDP_IPV4 | RSS_TYPE_UDP_IPV6 | RSS_TYPE_IPV6_EX)) == 0,
-	    ("UDP4, UDP6 and UDP6EX are not supported"));
+	(RSS_TYPE_UDP_IPV4 | RSS_TYPE_UDP_IPV6 | RSS_TYPE_UDP_IPV6_EX)) == 0,
+	("UDP4, UDP6 and UDP6EX are not supported"));
 
 	if (types & RSS_TYPE_IPV4)
 		rss_hash |= NDIS_HASH_IPV4;
@@ -1382,13 +1386,24 @@ hn_rss_type_tondis(uint32_t types)
 }
 
 static void
+hn_rss_mbuf_hash(struct hn_softc *sc, uint32_t mbuf_hash)
+{
+	int i;
+
+	HN_LOCK_ASSERT(sc);
+
+	for (i = 0; i < sc->hn_rx_ring_cnt; ++i)
+		sc->hn_rx_ring[i].hn_mbuf_hash = mbuf_hash;
+}
+
+static void
 hn_vf_rss_fixup(struct hn_softc *sc)
 {
 	struct ifnet *ifp, *vf_ifp;
 	struct ifrsshash ifrh;
 	struct ifrsskey ifrk;
 	int error;
-	uint32_t my_types, type_diffs;
+	uint32_t my_types, diff_types, mbuf_types = 0;
 
 	HN_LOCK_ASSERT(sc);
 	KASSERT(sc->hn_flags & HN_FLAG_SYNTH_ATTACHED,
@@ -1416,17 +1431,17 @@ hn_vf_rss_fixup(struct hn_softc *sc)
 	if (error) {
 		if_printf(ifp, "%s SIOCGRSSKEY failed: %d\n",
 		    vf_ifp->if_xname, error);
-		goto failed;
+		goto done;
 	}
 	if (ifrk.ifrk_func != RSS_FUNC_TOEPLITZ) {
 		if_printf(ifp, "%s RSS function %u is not Toeplitz\n",
 		    vf_ifp->if_xname, ifrk.ifrk_func);
-		goto failed;
+		goto done;
 	}
 	if (ifrk.ifrk_keylen != NDIS_HASH_KEYSIZE_TOEPLITZ) {
 		if_printf(ifp, "%s invalid RSS Toeplitz key length %d\n",
 		    vf_ifp->if_xname, ifrk.ifrk_keylen);
-		goto failed;
+		goto done;
 	}
 
 	/*
@@ -1438,12 +1453,12 @@ hn_vf_rss_fixup(struct hn_softc *sc)
 	if (error) {
 		if_printf(ifp, "%s SIOCGRSSHASH failed: %d\n",
 		    vf_ifp->if_xname, error);
-		goto failed;
+		goto done;
 	}
 	if (ifrh.ifrh_func != RSS_FUNC_TOEPLITZ) {
 		if_printf(ifp, "%s RSS function %u is not Toeplitz\n",
 		    vf_ifp->if_xname, ifrh.ifrh_func);
-		goto failed;
+		goto done;
 	}
 
 	my_types = hn_rss_type_fromndis(sc->hn_rss_hcap);
@@ -1452,11 +1467,12 @@ hn_vf_rss_fixup(struct hn_softc *sc)
 		if_printf(ifp, "%s intersection of RSS types failed.  "
 		    "VF %#x, mine %#x\n", vf_ifp->if_xname,
 		    ifrh.ifrh_types, my_types);
-		goto failed;
+		goto done;
 	}
 
-	type_diffs = my_types ^ ifrh.ifrh_types;
+	diff_types = my_types ^ ifrh.ifrh_types;
 	my_types &= ifrh.ifrh_types;
+	mbuf_types = my_types;
 
 	/*
 	 * Detect RSS hash value/type confliction.
@@ -1466,46 +1482,53 @@ hn_vf_rss_fixup(struct hn_softc *sc)
 	 * value/type through mbufs on RX path.
 	 */
 	if ((my_types & RSS_TYPE_IPV4) &&
-	    (type_diffs & ifrh.ifrh_types &
+	    (diff_types & ifrh.ifrh_types &
 	     (RSS_TYPE_TCP_IPV4 | RSS_TYPE_UDP_IPV4))) {
 		/* Conflict; disable IPV4 hash type/value delivery. */
 		if_printf(ifp, "disable IPV4 mbuf hash delivery\n");
+		mbuf_types &= ~RSS_TYPE_IPV4;
 	}
 	if ((my_types & RSS_TYPE_IPV6) &&
-	    (type_diffs & ifrh.ifrh_types &
+	    (diff_types & ifrh.ifrh_types &
 	     (RSS_TYPE_TCP_IPV6 | RSS_TYPE_UDP_IPV6 |
 	      RSS_TYPE_TCP_IPV6_EX | RSS_TYPE_UDP_IPV6_EX |
 	      RSS_TYPE_IPV6_EX))) {
 		/* Conflict; disable IPV6 hash type/value delivery. */
 		if_printf(ifp, "disable IPV6 mbuf hash delivery\n");
+		mbuf_types &= ~RSS_TYPE_IPV6;
 	}
 	if ((my_types & RSS_TYPE_IPV6_EX) &&
-	    (type_diffs & ifrh.ifrh_types &
+	    (diff_types & ifrh.ifrh_types &
 	     (RSS_TYPE_TCP_IPV6 | RSS_TYPE_UDP_IPV6 |
 	      RSS_TYPE_TCP_IPV6_EX | RSS_TYPE_UDP_IPV6_EX |
 	      RSS_TYPE_IPV6))) {
 		/* Conflict; disable IPV6_EX hash type/value delivery. */
 		if_printf(ifp, "disable IPV6_EX mbuf hash delivery\n");
+		mbuf_types &= ~RSS_TYPE_IPV6_EX;
 	}
 	if ((my_types & RSS_TYPE_TCP_IPV6) &&
-	    (type_diffs & ifrh.ifrh_types & RSS_TYPE_TCP_IPV6_EX)) {
+	    (diff_types & ifrh.ifrh_types & RSS_TYPE_TCP_IPV6_EX)) {
 		/* Conflict; disable TCP_IPV6 hash type/value delivery. */
 		if_printf(ifp, "disable TCP_IPV6 mbuf hash delivery\n");
+		mbuf_types &= ~RSS_TYPE_TCP_IPV6;
 	}
 	if ((my_types & RSS_TYPE_TCP_IPV6_EX) &&
-	    (type_diffs & ifrh.ifrh_types & RSS_TYPE_TCP_IPV6)) {
+	    (diff_types & ifrh.ifrh_types & RSS_TYPE_TCP_IPV6)) {
 		/* Conflict; disable TCP_IPV6_EX hash type/value delivery. */
 		if_printf(ifp, "disable TCP_IPV6_EX mbuf hash delivery\n");
+		mbuf_types &= ~RSS_TYPE_TCP_IPV6_EX;
 	}
 	if ((my_types & RSS_TYPE_UDP_IPV6) &&
-	    (type_diffs & ifrh.ifrh_types & RSS_TYPE_UDP_IPV6_EX)) {
+	    (diff_types & ifrh.ifrh_types & RSS_TYPE_UDP_IPV6_EX)) {
 		/* Conflict; disable UDP_IPV6 hash type/value delivery. */
 		if_printf(ifp, "disable UDP_IPV6 mbuf hash delivery\n");
+		mbuf_types &= ~RSS_TYPE_UDP_IPV6;
 	}
 	if ((my_types & RSS_TYPE_UDP_IPV6_EX) &&
-	    (type_diffs & ifrh.ifrh_types & RSS_TYPE_UDP_IPV6)) {
+	    (diff_types & ifrh.ifrh_types & RSS_TYPE_UDP_IPV6)) {
 		/* Conflict; disable UDP_IPV6_EX hash type/value delivery. */
 		if_printf(ifp, "disable UDP_IPV6_EX mbuf hash delivery\n");
+		mbuf_types &= ~RSS_TYPE_UDP_IPV6_EX;
 	}
 
 	/*
@@ -1521,15 +1544,11 @@ hn_vf_rss_fixup(struct hn_softc *sc)
 	if (error) {
 		/* XXX roll-back? */
 		if_printf(ifp, "hn_rss_reconfig failed: %d\n", error);
-		return;
+		/* XXX keep going. */
 	}
-
-	/* TODO: enable mbuf hash type/value setup. */
-
-	return;
-failed:
-	/* TODO disable all mbuf hash type/value setup. */
-	return;
+done:
+	/* Hash deliverability for mbufs. */
+	hn_rss_mbuf_hash(sc, hn_rss_type_tondis(mbuf_types));
 }
 
 static void
@@ -2138,6 +2157,9 @@ hn_attach(device_t dev)
 	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "rss_hashcap",
 	    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, sc, 0,
 	    hn_rss_hcap_sysctl, "A", "RSS hash capabilities");
+	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "mbuf_hash",
+	    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, sc, 0,
+	    hn_rss_mbuf_sysctl, "A", "RSS hash for mbufs");
 	SYSCTL_ADD_INT(ctx, child, OID_AUTO, "rss_ind_size",
 	    CTLFLAG_RD, &sc->hn_rss_ind_size, 0, "RSS indirect entry count");
 #ifndef RSS
@@ -4424,6 +4446,20 @@ hn_rss_hcap_sysctl(SYSCTL_HANDLER_ARGS)
 }
 
 static int
+hn_rss_mbuf_sysctl(SYSCTL_HANDLER_ARGS)
+{
+	struct hn_softc *sc = arg1;
+	char hash_str[128];
+	uint32_t hash;
+
+	HN_LOCK(sc);
+	hash = sc->hn_rx_ring[0].hn_mbuf_hash;
+	HN_UNLOCK(sc);
+	snprintf(hash_str, sizeof(hash_str), "%b", hash, NDIS_HASH_BITS);
+	return sysctl_handle_string(oidp, hash_str, sizeof(hash_str), req);
+}
+
+static int
 hn_vf_sysctl(SYSCTL_HANDLER_ARGS)
 {
 	struct hn_softc *sc = arg1;
@@ -4723,6 +4759,7 @@ hn_create_rx_data(struct hn_softc *sc, int ring_cnt)
 			rxr->hn_trust_hcsum |= HN_TRUST_HCSUM_UDP;
 		if (hn_trust_hostip)
 			rxr->hn_trust_hcsum |= HN_TRUST_HCSUM_IP;
+		rxr->hn_mbuf_hash = NDIS_HASH_ALL;
 		rxr->hn_ifp = sc->hn_ifp;
 		if (i < sc->hn_tx_ring_cnt)
 			rxr->hn_txr = &sc->hn_tx_ring[i];

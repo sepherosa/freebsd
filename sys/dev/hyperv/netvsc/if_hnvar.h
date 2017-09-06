@@ -64,6 +64,7 @@ struct hn_rx_ring {
 	void		*hn_pktbuf;
 	int		hn_pktbuf_len;
 	int		hn_rx_flags;	/* HN_RX_FLAG_ */
+	uint32_t	hn_mbuf_hash;	/* NDIS_HASH_ */
 	uint8_t		*hn_rxbuf;	/* shadow sc->hn_rxbuf */
 	int		hn_rx_idx;
 
