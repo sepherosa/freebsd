@@ -327,6 +327,7 @@ static int			hn_rss_key_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_rss_ind_sysctl(SYSCTL_HANDLER_ARGS);
 #endif
 static int			hn_rss_hash_sysctl(SYSCTL_HANDLER_ARGS);
+static int			hn_rss_hcap_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_txagg_size_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_txagg_pkts_sysctl(SYSCTL_HANDLER_ARGS);
 static int			hn_txagg_pktmax_sysctl(SYSCTL_HANDLER_ARGS);
@@ -1935,6 +1936,9 @@ hn_attach(device_t dev)
 	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "rss_hash",
 	    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, sc, 0,
 	    hn_rss_hash_sysctl, "A", "RSS hash");
+	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "rss_hashcap",
+	    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, sc, 0,
+	    hn_rss_hcap_sysctl, "A", "RSS hash capabilities");
 	SYSCTL_ADD_INT(ctx, child, OID_AUTO, "rss_ind_size",
 	    CTLFLAG_RD, &sc->hn_rss_ind_size, 0, "RSS indirect entry count");
 #ifndef RSS
@@ -4220,6 +4224,20 @@ hn_rss_hash_sysctl(SYSCTL_HANDLER_ARGS)
 }
 
 static int
+hn_rss_hcap_sysctl(SYSCTL_HANDLER_ARGS)
+{
+	struct hn_softc *sc = arg1;
+	char hash_str[128];
+	uint32_t hash;
+
+	HN_LOCK(sc);
+	hash = sc->hn_rss_hcap;
+	HN_UNLOCK(sc);
+	snprintf(hash_str, sizeof(hash_str), "%b", hash, NDIS_HASH_BITS);
+	return sysctl_handle_string(oidp, hash_str, sizeof(hash_str), req);
+}
+
+static int
 hn_vf_sysctl(SYSCTL_HANDLER_ARGS)
 {
 	struct hn_softc *sc = arg1;
@@ -5980,6 +5998,7 @@ hn_synth_attach(struct hn_softc *sc, int mtu)
 	/* Clear RSS stuffs. */
 	sc->hn_rss_ind_size = 0;
 	sc->hn_rss_hash = 0;
+	sc->hn_rss_hcap = 0;
 
 	/*
 	 * Attach the primary channel _before_ attaching NVS and RNDIS.
@@ -6097,6 +6116,9 @@ hn_synth_attach(struct hn_softc *sc, int mtu)
 		 */
 		hn_rss_ind_fixup(sc);
 	}
+
+	/* TODO: merge with VF */
+	sc->hn_rss_hash = sc->hn_rss_hcap;
 
 	error = hn_rndis_conf_rss(sc, NDIS_RSS_FLAG_NONE);
 	if (error)
