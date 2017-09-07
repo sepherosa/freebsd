@@ -3251,14 +3251,21 @@ hn_rxpkt(struct hn_rx_ring *rxr, const void *data, int dlen,
 {
 	struct ifnet *ifp, *hn_ifp = rxr->hn_ifp;
 	struct mbuf *m_new;
-	int size, do_lro = 0, do_csum = 1;
-	int hash_type;
+	int size, do_lro = 0, do_csum = 1, is_vf = 0;
+	int hash_type = M_HASHTYPE_NONE;
 
-	/*
-	 * If the non-transparent mode VF is active, inject this packet
-	 * into the VF.
-	 */
-	ifp = rxr->hn_rxvf_ifp ? rxr->hn_rxvf_ifp : hn_ifp;
+	ifp = hn_ifp;
+	if (rxr->hn_rxvf_ifp != NULL) {
+		/*
+		 * Non-transparent mode VF; pretend this packet is from
+		 * the VF.
+		 */
+		ifp = rxr->hn_rxvf_ifp;
+		is_vf = 1;
+	} else if (rxr->hn_rx_flags & HN_RX_FLAG_XPNT_VF) {
+		/* Transparent mode VF. */
+		is_vf = 1;
+	}
 
 	if ((ifp->if_drv_flags & IFF_DRV_RUNNING) == 0) {
 		/*
@@ -3411,16 +3418,6 @@ skip:
 	 * If VF is activated (tranparent/non-transparent mode does not
 	 * matter here).
 	 *
-	 * - Don't setup mbuf hash, if 'options RSS' is set.
-	 *
-	 *   In Azure, when VF is activated, TCP SYN and SYN|ACK go
-	 *   through hn(4) while the rest of segments and ACKs belonging
-	 *   to the same TCP 4-tuple go through the VF.  So don't setup
-	 *   mbuf hash, if a VF is activated and 'options RSS' is not
-	 *   enabled.  hn(4) and the VF may use neither the same RSS
-	 *   hash key nor the same RSS hash function, so the hash value
-	 *   for packets belonging to the same flow could be different!
-	 *
 	 * - Disable LRO
 	 *
 	 *   hn(4) will only receive broadcast packets, multicast packets,
@@ -3431,20 +3428,23 @@ skip:
 	 *   all, since the LRO flush will use hn(4) as the receiving
 	 *   interface; i.e. hn_ifp->if_input(hn_ifp, m).
 	 */
-	if (hn_ifp != ifp || (rxr->hn_rx_flags & HN_RX_FLAG_XPNT_VF)) {
-		do_lro = 0;	/* disable LRO. */
-#ifndef RSS
-		goto skip_hash;	/* skip mbuf hash setup */
-#endif
-	}
+	if (is_vf)
+		do_lro = 0;
 
+	/*
+	 * If VF is activated (tranparent/non-transparent mode does not
+	 * matter here), do _not_ mess with unsupported hash types or
+	 * functions.
+	 */
 	if (info->hash_info != HN_NDIS_HASH_INFO_INVALID) {
 		rxr->hn_rss_pkts++;
 		m_new->m_pkthdr.flowid = info->hash_value;
-		hash_type = M_HASHTYPE_OPAQUE_HASH;
+		if (!is_vf)
+			hash_type = M_HASHTYPE_OPAQUE_HASH;
 		if ((info->hash_info & NDIS_HASH_FUNCTION_MASK) ==
 		    NDIS_HASH_FUNCTION_TOEPLITZ) {
-			uint32_t type = (info->hash_info & NDIS_HASH_TYPE_MASK);
+			uint32_t type = (info->hash_info & NDIS_HASH_TYPE_MASK &
+			    rxr->hn_mbuf_hash);
 
 			/*
 			 * NOTE:
@@ -3481,15 +3481,12 @@ skip:
 				break;
 			}
 		}
-	} else {
+	} else if (!is_vf) {
 		m_new->m_pkthdr.flowid = rxr->hn_rx_idx;
 		hash_type = M_HASHTYPE_OPAQUE;
 	}
 	M_HASHTYPE_SET(m_new, hash_type);
 
-#ifndef RSS
-skip_hash:
-#endif
 	if_inc_counter(ifp, IFCOUNTER_IPACKETS, 1);
 	if (hn_ifp != ifp) {
 		const struct ether_header *eh;
