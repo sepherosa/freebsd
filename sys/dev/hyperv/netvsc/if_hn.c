@@ -284,7 +284,7 @@ static void			hn_xpnt_vf_init_taskfunc(void *, int);
 static void			hn_xpnt_vf_init(struct hn_softc *);
 static void			hn_xpnt_vf_setenable(struct hn_softc *);
 static void			hn_xpnt_vf_setdisable(struct hn_softc *, bool);
-static void			hn_vf_rss_fixup(struct hn_softc *);
+static void			hn_vf_rss_fixup(struct hn_softc *, bool);
 static void			hn_vf_rss_restore(struct hn_softc *);
 
 static int			hn_rndis_rxinfo(const void *, int,
@@ -1141,7 +1141,7 @@ hn_rxvf_change(struct hn_softc *sc, struct ifnet *ifp, bool rxvf)
 	hn_rxvf_set(sc, rxvf ? ifp : NULL);
 
 	if (rxvf) {
-		hn_vf_rss_fixup(sc);
+		hn_vf_rss_fixup(sc, true);
 		hn_suspend_mgmt(sc);
 		sc->hn_link_flags &=
 		    ~(HN_LINK_FLAG_LINKUP | HN_LINK_FLAG_NETCHG);
@@ -1400,7 +1400,7 @@ hn_rss_mbuf_hash(struct hn_softc *sc, uint32_t mbuf_hash)
 }
 
 static void
-hn_vf_rss_fixup(struct hn_softc *sc)
+hn_vf_rss_fixup(struct hn_softc *sc, bool reconf)
 {
 	struct ifnet *ifp, *vf_ifp;
 	struct ifrsshash ifrh;
@@ -1543,11 +1543,13 @@ hn_vf_rss_fixup(struct hn_softc *sc)
 	memcpy(sc->hn_rss.rss_key, ifrk.ifrk_key, sizeof(sc->hn_rss.rss_key));
 	sc->hn_flags |= HN_FLAG_HAS_RSSKEY;
 
-	error = hn_rss_reconfig(sc);
-	if (error) {
-		/* XXX roll-back? */
-		if_printf(ifp, "hn_rss_reconfig failed: %d\n", error);
-		/* XXX keep going. */
+	if (reconf) {
+		error = hn_rss_reconfig(sc);
+		if (error) {
+			/* XXX roll-back? */
+			if_printf(ifp, "hn_rss_reconfig failed: %d\n", error);
+			/* XXX keep going. */
+		}
 	}
 done:
 	/* Hash deliverability for mbufs. */
@@ -1755,7 +1757,7 @@ hn_xpnt_vf_init(struct hn_softc *sc)
 	 * Fixup RSS related bits _after_ the VF is brought up, since
 	 * many VFs generate RSS key during it's initialization.
 	 */
-	hn_vf_rss_fixup(sc);
+	hn_vf_rss_fixup(sc, true);
 
 	/* Mark transparent mode VF as enabled. */
 	hn_xpnt_vf_setenable(sc);
@@ -6392,9 +6394,12 @@ hn_synth_attach(struct hn_softc *sc, int mtu)
 		hn_rss_ind_fixup(sc);
 	}
 
-	/* TODO: merge with VF */
 	sc->hn_rss_hash = sc->hn_rss_hcap;
-
+	if ((sc->hn_flags & HN_FLAG_RXVF) ||
+	    (sc->hn_xvf_flags & HN_XVFFLAG_ENABLED)) {
+		/* NOTE: Don't reconfigure RSS; will do immediately. */
+		hn_vf_rss_fixup(sc, false);
+	}
 	error = hn_rndis_conf_rss(sc, NDIS_RSS_FLAG_NONE);
 	if (error)
 		goto failed;
