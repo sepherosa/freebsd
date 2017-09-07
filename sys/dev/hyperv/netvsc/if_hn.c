@@ -285,6 +285,7 @@ static void			hn_xpnt_vf_init(struct hn_softc *);
 static void			hn_xpnt_vf_setenable(struct hn_softc *);
 static void			hn_xpnt_vf_setdisable(struct hn_softc *, bool);
 static void			hn_vf_rss_fixup(struct hn_softc *);
+static void			hn_vf_rss_restore(struct hn_softc *);
 
 static int			hn_rndis_rxinfo(const void *, int,
 				    struct hn_rxinfo *);
@@ -1146,6 +1147,7 @@ hn_rxvf_change(struct hn_softc *sc, struct ifnet *ifp, bool rxvf)
 		    ~(HN_LINK_FLAG_LINKUP | HN_LINK_FLAG_NETCHG);
 		if_link_state_change(hn_ifp, LINK_STATE_DOWN);
 	} else {
+		hn_vf_rss_restore(sc);
 		hn_resume_mgmt(sc);
 	}
 
@@ -1553,6 +1555,36 @@ done:
 }
 
 static void
+hn_vf_rss_restore(struct hn_softc *sc)
+{
+
+	HN_LOCK_ASSERT(sc);
+	KASSERT(sc->hn_flags & HN_FLAG_SYNTH_ATTACHED,
+	    ("%s: synthetic parts are not attached", sc->hn_ifp->if_xname));
+
+	if (sc->hn_rx_ring_inuse == 1)
+		goto done;
+
+	/*
+	 * Restore hash types.  Key does _not_ matter.
+	 */
+	if (sc->hn_rss_hash != sc->hn_rss_hcap) {
+		int error;
+
+		sc->hn_rss_hash = sc->hn_rss_hcap;
+		error = hn_rss_reconfig(sc);
+		if (error) {
+			if_printf(sc->hn_ifp, "hn_rss_reconfig failed: %d\n",
+			    error);
+			/* XXX keep going. */
+		}
+	}
+done:
+	/* Hash deliverability for mbufs. */
+	hn_rss_mbuf_hash(sc, NDIS_HASH_ALL);
+}
+
+static void
 hn_xpnt_vf_setready(struct hn_softc *sc)
 {
 	struct ifnet *ifp, *vf_ifp;
@@ -1883,7 +1915,8 @@ hn_ifnet_detevent(void *xsc, struct ifnet *ifp)
 		ifp->if_input = sc->hn_vf_input;
 		sc->hn_vf_input = NULL;
 
-		if (sc->hn_xvf_flags & HN_XVFFLAG_ENABLED)
+		if ((sc->hn_flags & HN_FLAG_SYNTH_ATTACHED) &&
+		    (sc->hn_xvf_flags & HN_XVFFLAG_ENABLED))
 			hn_nvs_set_datapath(sc, HN_NVS_DATAPATH_SYNTH);
 
 		if (sc->hn_vf_rdytick == 0) {
@@ -1905,11 +1938,18 @@ hn_ifnet_detevent(void *xsc, struct ifnet *ifp)
 			sc->hn_ifp->if_hw_tsomaxsegsize = sc->hn_saved_tsosegsz;
 		}
 
-		/*
-		 * Resume link status management, which was suspended
-		 * by hn_ifnet_attevent().
-		 */
-		hn_resume_mgmt(sc);
+		if (sc->hn_flags & HN_FLAG_SYNTH_ATTACHED) {
+			/*
+			 * Restore RSS settings.
+			 */
+			hn_vf_rss_restore(sc);
+
+			/*
+			 * Resume link status management, which was suspended
+			 * by hn_ifnet_attevent().
+			 */
+			hn_resume_mgmt(sc);
+		}
 	}
 
 	/* Mark transparent mode VF as disabled. */
