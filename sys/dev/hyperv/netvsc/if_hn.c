@@ -4368,8 +4368,8 @@ hn_rss_key_sysctl(SYSCTL_HANDLER_ARGS)
 	if (error || req->newptr == NULL)
 		goto back;
 
-	if ((sc->hn_rx_ring[0].hn_rx_flags & HN_RX_FLAG_XPNT_VF) ||
-	    sc->hn_rx_ring[0].hn_rxvf_ifp != NULL) {
+	if ((sc->hn_flags & HN_FLAG_RXVF) ||
+	    (hn_xpnt_vf && sc->hn_vf_ifp != NULL)) {
 		/*
 		 * RSS key is synchronized w/ VF's, don't allow users
 		 * to change it.
