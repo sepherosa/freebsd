@@ -1140,6 +1140,7 @@ hn_rxvf_change(struct hn_softc *sc, struct ifnet *ifp, bool rxvf)
 	hn_rxvf_set(sc, rxvf ? ifp : NULL);
 
 	if (rxvf) {
+		hn_vf_rss_fixup(sc);
 		hn_suspend_mgmt(sc);
 		sc->hn_link_flags &=
 		    ~(HN_LINK_FLAG_LINKUP | HN_LINK_FLAG_NETCHG);
