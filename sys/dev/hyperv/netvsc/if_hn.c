@@ -1717,7 +1717,11 @@ hn_xpnt_vf_init(struct hn_softc *sc)
 	 */
 	hn_nvs_set_datapath(sc, HN_NVS_DATAPATH_VF);
 
-	/* Fixup RSS related bits. */
+	/*
+	 * NOTE:
+	 * Fixup RSS related bits _after_ the VF is brought up, since
+	 * many VFs generate RSS key during it's initialization.
+	 */
 	hn_vf_rss_fixup(sc);
 
 	/* Mark transparent mode VF as enabled. */
