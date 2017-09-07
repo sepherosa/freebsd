@@ -4368,6 +4368,16 @@ hn_rss_key_sysctl(SYSCTL_HANDLER_ARGS)
 	if (error || req->newptr == NULL)
 		goto back;
 
+	if ((sc->hn_rx_ring[0].hn_rx_flags & HN_RX_FLAG_XPNT_VF) ||
+	    sc->hn_rx_ring[0].hn_rxvf_ifp != NULL) {
+		/*
+		 * RSS key is synchronized w/ VF's, don't allow users
+		 * to change it.
+		 */
+		error = EBUSY;
+		goto back;
+	}
+
 	error = SYSCTL_IN(req, sc->hn_rss.rss_key, sizeof(sc->hn_rss.rss_key));
 	if (error)
 		goto back;
