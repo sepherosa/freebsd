@@ -2003,6 +2003,7 @@ hn_attach(device_t dev)
 	uint8_t eaddr[ETHER_ADDR_LEN];
 	struct ifnet *ifp = NULL;
 	int error, ring_cnt, tx_ring_cnt;
+	uint32_t mtu;
 
 	sc->hn_dev = dev;
 	sc->hn_prichan = vmbus_get_channel(dev);
@@ -2158,6 +2159,12 @@ hn_attach(device_t dev)
 	error = hn_rndis_get_eaddr(sc, eaddr);
 	if (error)
 		goto failed;
+
+	error = hn_rndis_get_mtu(sc, &mtu);
+	if (error)
+		mtu = ETHERMTU;
+	else if (bootverbose)
+		device_printf(dev, "RNDIS mtu %u\n", mtu);
 
 #if __FreeBSD_version >= 1100099
 	if (sc->hn_rx_ring_inuse > 1) {
