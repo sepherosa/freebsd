@@ -3594,6 +3594,7 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int mask, error = 0;
 	struct ifrsskey *ifrk;
 	struct ifrsshash *ifrh;
+	uint32_t mtu;
 
 	switch (cmd) {
 	case SIOCSIFMTU:
@@ -3656,6 +3657,12 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			HN_UNLOCK(sc);
 			break;
 		}
+
+		error = hn_rndis_get_mtu(sc, &mtu);
+		if (error)
+			mtu = ifr->ifr_mtu;
+		else if (bootverbose)
+			if_printf(ifp, "RNDIS mtu %u\n", mtu);
 
 		/*
 		 * Commit the requested MTU, after the synthetic parts
