@@ -2350,6 +2350,10 @@ hn_attach(device_t dev)
 		if_printf(ifp, "TSO segcnt %u segsz %u\n",
 		    ifp->if_hw_tsomaxsegcount, ifp->if_hw_tsomaxsegsize);
 	}
+	if (mtu < ETHERMTU) {
+		if_printf(ifp, "fixup mtu %u -> %u\n", ifp->if_mtu, mtu);
+		ifp->if_mtu = mtu;
+	}
 
 	/* Inform the upper layer about the long frame support. */
 	ifp->if_hdrlen = sizeof(struct ether_vlan_header);
@@ -3668,7 +3672,13 @@ hn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		 * Commit the requested MTU, after the synthetic parts
 		 * have been successfully attached.
 		 */
-		ifp->if_mtu = ifr->ifr_mtu;
+		if (mtu >= ifr->ifr_mtu) {
+			mtu = ifr->ifr_mtu;
+		} else {
+			if_printf(ifp, "fixup mtu %d -> %u\n",
+			    ifr->ifr_mtu, mtu);
+		}
+		ifp->if_mtu = mtu;
 
 		/*
 		 * Synthetic parts' reattach may change the chimney
