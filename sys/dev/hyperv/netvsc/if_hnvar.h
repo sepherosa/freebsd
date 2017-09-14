@@ -36,7 +36,7 @@
 #define HN_RXBUF_SIZE			(16 * 1024 * 1024)
 #define HN_RXBUF_SIZE_COMPAT		(15 * 1024 * 1024)
 
-#define HN_MTU_MAX			(65536 - ETHER_ADDR_LEN)
+#define HN_MTU_MAX			(65535 - ETHER_ADDR_LEN)
 
 #define HN_TXBR_SIZE			(128 * PAGE_SIZE)
 #define HN_RXBR_SIZE			(128 * PAGE_SIZE)
