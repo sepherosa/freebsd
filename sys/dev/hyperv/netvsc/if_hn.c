@@ -461,7 +461,7 @@ SYSCTL_INT(_hw_hn, OID_AUTO, trust_hostip, CTLFLAG_RDTUN,
     "when csum info is missing (global setting)");
 
 /*
- * Offload UDP/IPv4 checksum.
+ * Offload IPv4 header checksum.
  *
  * NOTE:
  * - It works fine w/ Hyper-V.
@@ -470,9 +470,9 @@ SYSCTL_INT(_hw_hn, OID_AUTO, trust_hostip, CTLFLAG_RDTUN,
  *
  * Turn it off by default.
  */
-static int			hn_enable_udp4cs = 0;
-SYSCTL_INT(_hw_hn, OID_AUTO, enable_udp4cs, CTLFLAG_RDTUN,
-    &hn_enable_udp4cs, 0, "Offload UDP/IPv4 checksum");
+static int			hn_enable_ipcs = 0;
+SYSCTL_INT(_hw_hn, OID_AUTO, enable_ipcs, CTLFLAG_RDTUN,
+    &hn_enable_ipcs, 0, "Offload IPv4 header checksum");
 
 /* Limit TSO burst size */
 static int			hn_tso_maxlen = IP_MAXPACKET;
@@ -5469,11 +5469,11 @@ hn_fixup_tx_data(struct hn_softc *sc)
 		hn_set_chim_size(sc, hn_tx_chimney_size);
 
 	csum_assist = 0;
-	if (sc->hn_caps & HN_CAP_IPCS)
+	if ((sc->hn_caps & HN_CAP_IPCS) && hn_enable_ipcs)
 		csum_assist |= CSUM_IP;
 	if (sc->hn_caps & HN_CAP_TCP4CS)
 		csum_assist |= CSUM_IP_TCP;
-	if ((sc->hn_caps & HN_CAP_UDP4CS) && hn_enable_udp4cs)
+	if (sc->hn_caps & HN_CAP_UDP4CS)
 		csum_assist |= CSUM_IP_UDP;
 	if (sc->hn_caps & HN_CAP_TCP6CS)
 		csum_assist |= CSUM_IP6_TCP;
