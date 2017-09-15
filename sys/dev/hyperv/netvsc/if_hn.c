@@ -460,6 +460,20 @@ SYSCTL_INT(_hw_hn, OID_AUTO, trust_hostip, CTLFLAG_RDTUN,
     "Trust ip packet verification on host side, "
     "when csum info is missing (global setting)");
 
+/*
+ * Offload UDP/IPv4 checksum.
+ *
+ * NOTE:
+ * - It works fine w/ Hyper-V.
+ * - It causes trouble in Azure w/ UDP datagrams, whose payload size > 1392
+ *   and the IPv4 header does not have DF set.
+ *
+ * Turn it off by default.
+ */
+static int			hn_enable_udp4cs = 0;
+SYSCTL_INT(_hw_hn, OID_AUTO, enable_udp4cs, CTLFLAG_RDTUN,
+    &hn_enable_udp4cs, 0, "Offload UDP/IPv4 checksum");
+
 /* Limit TSO burst size */
 static int			hn_tso_maxlen = IP_MAXPACKET;
 SYSCTL_INT(_hw_hn, OID_AUTO, tso_maxlen, CTLFLAG_RDTUN,
@@ -5479,7 +5493,7 @@ hn_fixup_tx_data(struct hn_softc *sc)
 		csum_assist |= CSUM_IP;
 	if (sc->hn_caps & HN_CAP_TCP4CS)
 		csum_assist |= CSUM_IP_TCP;
-	if (sc->hn_caps & HN_CAP_UDP4CS)
+	if ((sc->hn_caps & HN_CAP_UDP4CS) && hn_enable_udp4cs)
 		csum_assist |= CSUM_IP_UDP;
 	if (sc->hn_caps & HN_CAP_TCP6CS)
 		csum_assist |= CSUM_IP6_TCP;
