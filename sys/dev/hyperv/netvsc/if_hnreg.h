@@ -123,6 +123,7 @@ CTASSERT(sizeof(struct hn_nvs_ndis_conf) >= HN_NVS_REQSIZE_MIN);
 
 #define HN_NVS_NDIS_CONF_SRIOV		0x0004
 #define HN_NVS_NDIS_CONF_VLAN		0x0008
+#define HN_NVS_NDIS_CONF_TEAMING	0x0020
 
 /* No response */
 struct hn_nvs_ndis_init {
