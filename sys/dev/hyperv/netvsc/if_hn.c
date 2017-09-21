@@ -827,7 +827,7 @@ hn_set_hlen(struct mbuf *m_head)
 		m_head->m_pkthdr.l3hlen = iphlen;
 
 		if ((m_head->m_pkthdr.csum_flags & CSUM_IP_UDP) &&
-		    m_head->m_pkthdr.len > 1420 /* XXX glob sysctl */ &&
+		    m_head->m_pkthdr.len > 1420 + ehlen/* XXX glob sysctl */ &&
 		    (ntohs(ip->ip_off) & IP_DF) == 0) {
 			uint16_t off = ehlen + iphlen;
 
