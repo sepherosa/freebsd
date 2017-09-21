@@ -474,6 +474,16 @@ static int			hn_enable_udp4cs = 0;
 SYSCTL_INT(_hw_hn, OID_AUTO, enable_udp4cs, CTLFLAG_RDTUN,
     &hn_enable_udp4cs, 0, "Offload UDP/IPv4 checksum");
 
+/*
+ * Offload UDP/IPv6 checksum.
+ *
+ * NOTE:
+ * - It works fine w/ Hyper-V.
+ */
+static int			hn_enable_udp6cs = 1;
+SYSCTL_INT(_hw_hn, OID_AUTO, enable_udp6cs, CTLFLAG_RDTUN,
+    &hn_enable_udp6cs, 0, "Offload UDP/IPv6 checksum");
+
 /* Limit TSO burst size */
 static int			hn_tso_maxlen = IP_MAXPACKET;
 SYSCTL_INT(_hw_hn, OID_AUTO, tso_maxlen, CTLFLAG_RDTUN,
@@ -5497,7 +5507,7 @@ hn_fixup_tx_data(struct hn_softc *sc)
 		csum_assist |= CSUM_IP_UDP;
 	if (sc->hn_caps & HN_CAP_TCP6CS)
 		csum_assist |= CSUM_IP6_TCP;
-	if (sc->hn_caps & HN_CAP_UDP6CS)
+	if (sc->hn_caps & HN_CAP_UDP6CS && hn_enable_udp6cs)
 		csum_assist |= CSUM_IP6_UDP;
 	for (i = 0; i < sc->hn_tx_ring_cnt; ++i)
 		sc->hn_tx_ring[i].hn_csum_assist = csum_assist;
