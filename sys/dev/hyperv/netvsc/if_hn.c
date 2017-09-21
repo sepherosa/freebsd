@@ -5534,7 +5534,7 @@ hn_fixup_tx_data(struct hn_softc *sc)
 		csum_assist |= CSUM_IP_UDP;
 	if (sc->hn_caps & HN_CAP_TCP6CS)
 		csum_assist |= CSUM_IP6_TCP;
-	if (sc->hn_caps & HN_CAP_UDP6CS && hn_enable_udp6cs)
+	if ((sc->hn_caps & HN_CAP_UDP6CS) && hn_enable_udp6cs)
 		csum_assist |= CSUM_IP6_UDP;
 	for (i = 0; i < sc->hn_tx_ring_cnt; ++i)
 		sc->hn_tx_ring[i].hn_csum_assist = csum_assist;
