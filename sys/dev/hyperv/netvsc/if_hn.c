@@ -463,15 +463,8 @@ SYSCTL_INT(_hw_hn, OID_AUTO, trust_hostip, CTLFLAG_RDTUN,
 
 /*
  * Offload UDP/IPv4 checksum.
- *
- * NOTE:
- * - It works fine w/ Hyper-V.
- * - It causes trouble in Azure w/ UDP datagrams, whose payload size > 1392
- *   and the IPv4 header does not have DF set.
- *
- * Turn it off by default.
  */
-static int			hn_enable_udp4cs = 0;
+static int			hn_enable_udp4cs = 1;
 SYSCTL_INT(_hw_hn, OID_AUTO, enable_udp4cs, CTLFLAG_RDTUN,
     &hn_enable_udp4cs, 0, "Offload UDP/IPv4 checksum");
 
@@ -482,9 +475,20 @@ static int			hn_enable_udp6cs = 1;
 SYSCTL_INT(_hw_hn, OID_AUTO, enable_udp6cs, CTLFLAG_RDTUN,
     &hn_enable_udp6cs, 0, "Offload UDP/IPv6 checksum");
 
+/* Stats. */
 static counter_u64_t		hn_udpcs_fixup;
 SYSCTL_COUNTER_U64(_hw_hn, OID_AUTO, udpcs_fixup, CTLFLAG_RW,
     &hn_udpcs_fixup, "# of UDP checksum fixup");
+
+/*
+ * See hn_set_hlen().
+ *
+ * This value is for Azure.  For Hyper-V, set this above
+ * 65536 to disable UDP datagram checksum fixup.
+ */
+static int			hn_udpcs_fixup_mtu = 1420;
+SYSCTL_INT(_hw_hn, OID_AUTO, udpcs_fixup_mtu, CTLFLAG_RWTUN,
+    &hn_udpcs_fixup_mtu, 0, "UDP checksum fixup MTU threshold");
 
 /* Limit TSO burst size */
 static int			hn_tso_maxlen = IP_MAXPACKET;
@@ -826,8 +830,16 @@ hn_set_hlen(struct mbuf *m_head)
 		iphlen = ip->ip_hl << 2;
 		m_head->m_pkthdr.l3hlen = iphlen;
 
+		/*
+		 * UDP checksum offload does not work in Azure, if the
+		 * following conditions meet:
+		 * - sizeof(IP hdr + UDP hdr + payload) > 1420.
+		 * - IP_DF is not set in the IP hdr.
+		 *
+		 * Fallback to software checksum for these UDP datagrams.
+		 */
 		if ((m_head->m_pkthdr.csum_flags & CSUM_IP_UDP) &&
-		    m_head->m_pkthdr.len > 1420 + ehlen/* XXX glob sysctl */ &&
+		    m_head->m_pkthdr.len > hn_udpcs_fixup_mtu + ehlen &&
 		    (ntohs(ip->ip_off) & IP_DF) == 0) {
 			uint16_t off = ehlen + iphlen;
 
