@@ -836,7 +836,7 @@ hn_set_hlen(struct mbuf *m_head)
 			*(uint16_t *)(m_head->m_data + off +
                             m_head->m_pkthdr.csum_data) = in_cksum_skip(
 			    m_head, m_head->m_pkthdr.len, off);
-			m_head->m_pkthdr.csum_flags &= CSUM_IP_UDP;
+			m_head->m_pkthdr.csum_flags &= ~CSUM_IP_UDP;
 		}
 	}
 #endif
