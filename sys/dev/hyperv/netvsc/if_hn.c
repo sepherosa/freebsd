@@ -62,6 +62,7 @@ __FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
 #include <sys/bus.h>
+#include <sys/counter.h>
 #include <sys/kernel.h>
 #include <sys/limits.h>
 #include <sys/malloc.h>
@@ -476,13 +477,14 @@ SYSCTL_INT(_hw_hn, OID_AUTO, enable_udp4cs, CTLFLAG_RDTUN,
 
 /*
  * Offload UDP/IPv6 checksum.
- *
- * NOTE:
- * - It works fine w/ Hyper-V.
  */
 static int			hn_enable_udp6cs = 1;
 SYSCTL_INT(_hw_hn, OID_AUTO, enable_udp6cs, CTLFLAG_RDTUN,
     &hn_enable_udp6cs, 0, "Offload UDP/IPv6 checksum");
+
+static counter_u64_t		hn_udpcs_fixup;
+SYSCTL_COUNTER_U64(_hw_hn, OID_AUTO, udpcs_fixup, CTLFLAG_RW,
+    &hn_udpcs_fixup, "# of UDP checksum fixup");
 
 /* Limit TSO burst size */
 static int			hn_tso_maxlen = IP_MAXPACKET;
@@ -823,6 +825,19 @@ hn_set_hlen(struct mbuf *m_head)
 		ip = mtodo(m_head, ehlen);
 		iphlen = ip->ip_hl << 2;
 		m_head->m_pkthdr.l3hlen = iphlen;
+
+		if ((m_head->m_pkthdr.csum_flags & CSUM_IP_UDP) &&
+		    m_head->m_pkthdr.len > 1420 /* XXX glob sysctl */ &&
+		    (ntohs(ip->ip_off) & IP_DF) == 0) {
+			uint16_t off = ehlen + iphlen;
+
+			counter_u64_add(hn_udpcs_fixup, 1);
+			PULLUP_HDR(m_head, off + sizeof(struct udphdr));
+			*(uint16_t *)(m_head->m_data + off +
+                            m_head->m_pkthdr.csum_data) = in_cksum_skip(
+			    m_head, m_head->m_pkthdr.len, off);
+			m_head->m_pkthdr.csum_flags &= CSUM_IP_UDP;
+		}
 	}
 #endif
 #if defined(INET6) && defined(INET)
@@ -7360,6 +7375,8 @@ hn_sysinit(void *arg __unused)
 {
 	int i;
 
+	hn_udpcs_fixup = counter_u64_alloc(M_WAITOK);
+
 #ifdef HN_IFSTART_SUPPORT
 	/*
 	 * Don't use ifnet.if_start if transparent VF mode is requested;
@@ -7439,5 +7456,7 @@ hn_sysuninit(void *arg __unused)
 	if (hn_vfmap != NULL)
 		free(hn_vfmap, M_DEVBUF);
 	rm_destroy(&hn_vfmap_lock);
+
+	counter_u64_free(hn_udpcs_fixup);
 }
 SYSUNINIT(hn_sysuninit, SI_SUB_DRIVERS, SI_ORDER_SECOND, hn_sysuninit, NULL);
