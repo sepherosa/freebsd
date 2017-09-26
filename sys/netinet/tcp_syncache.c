@@ -1635,7 +1635,8 @@ syncache_respond(struct syncache *sc, struct syncache_head *sch, int locked,
 
 	/* Determine MSS we advertize to other end of connection. */
 	mssopt = tcp_mssopt(&sc->sc_inc);
-	mssopt = max(mssopt, V_tcp_minmss);
+	if (sc->sc_peer_mss)
+		mssopt = max( min(sc->sc_peer_mss, mssopt), V_tcp_minmss);
 
 	/* XXX: Assume that the entire packet will fit in a header mbuf. */
 	KASSERT(max_linkhdr + tlen + TCP_MAXOLEN <= MHLEN,
