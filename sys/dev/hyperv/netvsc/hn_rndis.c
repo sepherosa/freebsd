@@ -784,7 +784,8 @@ hn_rndis_conf_rss(struct hn_softc *sc, uint16_t flags)
 	prm->ndis_hdr.ndis_rev = NDIS_RSS_PARAMS_REV_2;
 	prm->ndis_hdr.ndis_size = rss_size;
 	prm->ndis_flags = flags;
-	prm->ndis_hash = sc->hn_rss_hash & NDIS_HASH_STD;
+	prm->ndis_hash = sc->hn_rss_hash &
+	    (NDIS_HASH_STD | NDIS_HASH_FUNCTION_MASK);
 	prm->ndis_indsize = sizeof(rss->rss_ind[0]) * sc->hn_rss_ind_size;
 	prm->ndis_indoffset =
 	    __offsetof(struct ndis_rssprm_toeplitz, rss_ind[0]);
