@@ -521,6 +521,10 @@ hn_rndis_query_rsscaps(struct hn_softc *sc, int *rxr_cnt0)
 	/* Commit! */
 	sc->hn_rss_ind_size = indsz;
 	sc->hn_rss_hcap = hash_func | hash_types;
+	if (sc->hn_caps & HN_CAP_UDPHASH) {
+		/* UDP 4-tuple hash is unconditionally enabled. */
+		sc->hn_rss_hcap |= NDIS_HASH_UDP_IPV4_X;
+	}
 	*rxr_cnt0 = rxr_cnt;
 	return (0);
 }
@@ -780,7 +784,7 @@ hn_rndis_conf_rss(struct hn_softc *sc, uint16_t flags)
 	prm->ndis_hdr.ndis_rev = NDIS_RSS_PARAMS_REV_2;
 	prm->ndis_hdr.ndis_size = rss_size;
 	prm->ndis_flags = flags;
-	prm->ndis_hash = sc->hn_rss_hash;
+	prm->ndis_hash = sc->hn_rss_hash & NDIS_HASH_STD;
 	prm->ndis_indsize = sizeof(rss->rss_ind[0]) * sc->hn_rss_ind_size;
 	prm->ndis_indoffset =
 	    __offsetof(struct ndis_rssprm_toeplitz, rss_ind[0]);
