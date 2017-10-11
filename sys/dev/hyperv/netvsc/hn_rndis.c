@@ -764,8 +764,10 @@ hn_rndis_conf_rss(struct hn_softc *sc, uint16_t flags)
 	    ("NDIS 6.20+ is required, NDIS version 0x%08x", sc->hn_ndis_ver));
 
 	/* XXX only one can be specified through, popcnt? */
-	KASSERT((sc->hn_rss_hash & NDIS_HASH_FUNCTION_MASK), ("no hash func"));
-	KASSERT((sc->hn_rss_hash & NDIS_HASH_TYPE_MASK), ("no hash types"));
+	KASSERT((sc->hn_rss_hash & NDIS_HASH_FUNCTION_MASK),
+	    ("no hash func %08x", sc->hn_rss_hash));
+	KASSERT((sc->hn_rss_hash & NDIS_HASH_STD),
+	    ("no standard hash types %08x", sc->hn_rss_hash));
 	KASSERT(sc->hn_rss_ind_size > 0, ("no indirect table size"));
 
 	if (bootverbose) {
@@ -785,7 +787,7 @@ hn_rndis_conf_rss(struct hn_softc *sc, uint16_t flags)
 	prm->ndis_hdr.ndis_size = rss_size;
 	prm->ndis_flags = flags;
 	prm->ndis_hash = sc->hn_rss_hash &
-	    (NDIS_HASH_STD | NDIS_HASH_FUNCTION_MASK);
+	    (NDIS_HASH_FUNCTION_MASK | NDIS_HASH_STD);
 	prm->ndis_indsize = sizeof(rss->rss_ind[0]) * sc->hn_rss_ind_size;
 	prm->ndis_indoffset =
 	    __offsetof(struct ndis_rssprm_toeplitz, rss_ind[0]);
